@@ -14,10 +14,8 @@ local infl
 
 local lua_version = tonumber(_VERSION:match("^Lua (.*)"))
 if not lua_version or lua_version < 5.3 then
-  -- older version of Lua or Luajit being used - use bit/bit32-based implementation
   infl = require("inflate-bit32")
 else
-  -- From Lua 5.3, use implementation based on bitwise operators
   infl = require("inflate-bwo")
 end
 
@@ -76,7 +74,6 @@ local function inflate_gzip(bs)
     bs.pos = pos+1
   end
   if infl.band(flg,2) ~= 0 then
-    -- TODO: check header CRC16
     bs.pos = bs.pos+2
   end
   local result = arraytostr(infl.main(bs))
@@ -88,7 +85,6 @@ local function inflate_gzip(bs)
   return result
 end
 
--- compute Adler-32 checksum
 local function adler32(s)
   local s1 = 1
   local s2 = 0
@@ -163,10 +159,8 @@ end
 
 local function nextfile(buf,p)
   if int4le(buf,p) ~= 0x02014b50 then
-    -- end of central directory list
     return
   end
-  -- local flag = int2le(buf,p+8)
   local packed = int2le(buf,p+10)~=0
   local crc = int4le(buf,p+16)
   local namelen = int2le(buf,p+28)
@@ -185,8 +179,6 @@ end
 function zzlib.files(buf)
   local p = #buf-21
   if int4le(buf,p) ~= 0x06054b50 then
-    -- not sure there is a reliable way to locate the end of central directory record
-    -- if it has a variable sized comment field
     error(".ZIP file comments not supported")
   end
   local cdoffset = int4le(buf,p+16)+1
@@ -195,19 +187,15 @@ end
 
 function zzlib.unzip(buf,arg1,arg2)
   if type(arg1) == "number" then
-    -- mode 1: unpack data from specified position in zip file
     return inflate_raw(buf,arg1,arg2)
   end
-  -- mode 2: search and unpack file from zip file
   local filename = arg1
   for _,name,offset,size,packed,crc in zzlib.files(buf) do
     if name == filename then
       local result
       if not packed then
-        -- no compression
         result = buf:sub(offset,offset+size-1)
       else
-        -- DEFLATE compression
         result = inflate_raw(buf,offset,crc)
       end
       return result
@@ -309,7 +297,7 @@ function zzlib.unzip_full_archive_files(path_to_archive, output_path)
   if not entries then return false end
   for _, entry in ipairs(entries) do
     if entry.type == "directory" then
-        createDirectory(output_path .. entry.name)
+        createDirectory(output_path .. "\\" .. entry.name)
     elseif entry.type == "file_in_folder" then
         local path_without_filename = entry.name:match("(.*[/\\])"):gsub("[/\\]$", "")
         zzlib.unzip_entry(path_to_archive, entry.name, output_path .. "\\" .. path_without_filename)
