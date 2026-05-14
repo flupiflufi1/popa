@@ -12,13 +12,11 @@
 local unpack = table.unpack or unpack
 local infl
 
-local lua_version = tonumber(_VERSION:match("^Lua (.*)"))
-if not lua_version or lua_version < 5.3 then
-  -- older version of Lua or Luajit being used - use bit/bit32-based implementation
-  infl = require("inflate-bit32")
+local ok_bwo, infl_bwo = pcall(require, "inflate-bwo")
+if ok_bwo then
+  infl = infl_bwo       -- всегда используем bwo если доступен
 else
-  -- From Lua 5.3, use implementation based on bitwise operators
-  infl = require("inflate-bwo")
+  infl = require("inflate-bit32")  -- fallback
 end
 
 local zzlib = {}
@@ -198,7 +196,7 @@ function zzlib.unzip(buf,arg1,arg2)
     -- mode 1: unpack data from specified position in zip file
     return inflate_raw(buf,arg1,arg2)
   end
-  -- mode 2:�search and unpack file from zip file
+  -- mode 2: search and unpack file from zip file
   local filename = arg1
   for _,name,offset,size,packed,crc in zzlib.files(buf) do
     if name == filename then
