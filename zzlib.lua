@@ -12,11 +12,13 @@
 local unpack = table.unpack or unpack
 local infl
 
-local ok_bwo, infl_bwo = pcall(require, "inflate-bwo")
-if ok_bwo then
-  infl = infl_bwo       -- всегда используем bwo если доступен
+local lua_version = tonumber(_VERSION:match("^Lua (.*)"))
+if not lua_version or lua_version < 5.3 then
+  -- older version of Lua or Luajit being used - use bit/bit32-based implementation
+  infl = require("inflate-bit32")
 else
-  infl = require("inflate-bit32")  -- fallback
+  -- From Lua 5.3, use implementation based on bitwise operators
+  infl = require("inflate-bwo")
 end
 
 local zzlib = {}
