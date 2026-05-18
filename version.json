@@ -1,1 +1,6 @@
-{"latest":"0.0.5","updateurl":"https://raw.githubusercontent.com/flupiflufi1/popa/main/Saw_Full.lua"}
+{
+  "latest": "0.0.5",
+  "updateurl": "https://raw.githubusercontent.com/flupiflufi1/popa/main/Saw_Full.lua",
+  "navmesh": "0.0.1",
+  "navmeshobnova": "https://raw.githubusercontent.com/flupiflufi1/popa/main/navmesh.zip"
+}
