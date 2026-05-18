@@ -6,10 +6,10 @@ script_description("Leso\xD0\xF3\xE1 \xFD\xF2\xE0 \xE1\xEE\xF2 \xED\xE0 \xEB\xE5
 local mem = require "memory"
 local mad = require("MoonAdditions")
 local imgui = require 'mimgui'
-local ti = require 'tabler_icons'
 local samp = require 'lib.samp.events'
 local font = renderCreateFont('Arial', 9, 5)
 local json = require 'dkjson'
+local ti = require 'tabler_icons'
 local effil    = require 'effil'
 local g_cpos = imgui.GetCursorPos
 local ffi = require 'ffi'
@@ -22,19 +22,23 @@ local ok_particles, Particles = pcall(require, 'Particles')
 
 local required = {
     "memory", "MoonAdditions", "mimgui", "tabler_icons",
-    "encoding", "lib.samp.events", "dkjson", "effil"
+    "encoding", "lib.samp.events", "dkjson", "effil", "Particles", "multipart-post"
 }
+
 local navmesh = {"navmesh.navmesh", "navmesh.movement", "navmesh.render"}
-local sawmill_hidden = false
+
 local missing = {}
 for _, lib in ipairs(required) do
     if not pcall(require, lib) then missing[#missing+1] = lib end
 end
+
 local nav_missing = false
 for _, lib in ipairs(navmesh) do
     if not pcall(require, lib) then nav_missing = true; break end
 end
+
 if nav_missing then missing[#missing+1] = "navmesh (navmesh.navmesh / movement / render)" end
+
 libs_missing = #missing > 0
 local ml_path    = getWorkingDirectory()
 local logo_tex      = nil
@@ -49,63 +53,65 @@ function ensure_config_dir()
         createDirectory(cfg_dir)
     end
 end
+
 local im = imgui_pre
+
 function try_load_logo()
     if logo_loaded or logo_loading then return end
     ensure_config_dir()
     if doesFileExist(LOGO_PATH) then
-        local ok_t, tex = pcall(function()
+        local logo_texture_ok, tex = pcall(function()
             return im.CreateTextureFromFile and im.CreateTextureFromFile(LOGO_PATH)
                 or (renderLoadTextureFromFile and renderLoadTextureFromFile(LOGO_PATH))
                 or nil
         end)
-        if ok_t and tex then
+        if logo_texture_ok and tex then
             logo_tex    = tex
             logo_loaded = true
         end
     else
         logo_loading = true
         lua_thread.create(function()
-            local dl2 = require('moonloader').download_status
-            local done2, err2 = false, false
+            local logo_dl_status = require('moonloader').download_status
+            local logo_download_done, logo_download_failed = false, false
             downloadUrlToFile(LOGO_URL, LOGO_PATH, function(_, st2)
-                if st2 == dl2.STATUS_ENDDOWNLOADDATA then done2 = true
-                elseif st2 == dl2.STATUSEX_ENDDOWNLOAD and not done2 then err2 = true end
+                if st2 == logo_dl_status.STATUS_ENDDOWNLOADDATA then logo_download_done = true
+                elseif st2 == logo_dl_status.STATUSEX_ENDDOWNLOAD and not logo_download_done then logo_download_failed = true end
             end)
             local t2 = os.clock() + 15
-            while not done2 and not err2 and os.clock() < t2 do wait(100) end
+            while not logo_download_done and not logo_download_failed and os.clock() < t2 do wait(100) end
             logo_loading = false
-            if done2 and doesFileExist(LOGO_PATH) then
-                local ok3, tex3 = pcall(function()
+            if logo_download_done and doesFileExist(LOGO_PATH) then
+                local logo_texture_loaded, logo_texture = pcall(function()
                     return im.CreateTextureFromFile and im.CreateTextureFromFile(LOGO_PATH)
                         or (renderLoadTextureFromFile and renderLoadTextureFromFile(LOGO_PATH))
                         or nil
                 end)
-                if ok3 and tex3 then
-                    logo_tex    = tex3
+                if logo_texture_loaded and logo_texture then
+                    logo_tex    = logo_texture
                     logo_loaded = true
                 end
             end
         end)
     end
 end
+
 if libs_missing then
     if not ok_imgui then
-        print("[LesoRub] ======== \xCE\xEF\xF3\xF9\xE5\xED\xED\xFB\xE5 \xE1\xE8\xE1\xEB\xE5\xEE\xF2\xE5\xEA\xE8 ========")
-        for _, v in ipairs(missing) do print("[LesoRub] \xCF\xF0\xEE\xEF\xF3\xF9\xE5\xED\xEE: " .. v) end
-        print("[LesoRub] \xD1\xEA\xE0\xF7\xE0\xF2\xFC: https://github.com/flupiflufi1/popa/releases")
+        cMsg("\xCE\xEF\xF3\xF9\xE5\xED\xED\xFB\xE5 \xE1\xE8\xE1\xEB\xE5\xEE\xF2\xE5\xEA\xE8")
+        for _, v in ipairs(missing) do cMsg("\xCF\xF0\xEE\xEF\xF3\xF9\xE5\xED\xEE: " .. v) end
+        cMsg("\xD1\xEA\xE0\xF7\xE0\xF2\xFC: https://github.com/flupiflufi1/popa/releases")
     else
         local im = imgui_pre
         local LIBS_URL    = "https://raw.githubusercontent.com/flupiflufi1/popa/main/lesobot_libs.zip"
         local NAVMESH_URL = "https://raw.githubusercontent.com/flupiflufi1/popa/main/navmesh.zip"
 
-        libo_show_win   = im.new.bool(true)
-        libo_progress   = im.new.float(0)
-        libo_state      = 'idle'
-        libo_status     = u8("\xC3\xEE\xF2\xEE\xE2\xEE")
-        local ml_path    = getWorkingDirectory()
-        local zip1       = ml_path .. '\\lesobot_libs_tmp.zip'
-        local zip2       = ml_path .. '\\navmesh_tmp.zip'
+        installer_window_open   = im.new.bool(false)
+        installer_progress   = im.new.float(0)
+        installer_state      = 'idle'
+        installer_status_text     = u8("\xC3\xEE\xF2\xEE\xE2\xEE")
+        local libs_zip_path       = ml_path .. '\\lesobot_libs_tmp.zip'
+        local navmesh_zip_tmp_path       = ml_path .. '\\navmesh_tmp.zip'
 
         local ZZLIB_URL    = "https://raw.githubusercontent.com/flupiflufi1/popa/main/zzlib.lua"
         local INFLATE1_URL = "https://raw.githubusercontent.com/flupiflufi1/popa/main/inflate-bwo.lua"
@@ -132,17 +138,16 @@ if libs_missing then
                 end
             end)
         end
-        libo_start_dl = function()
-            libo_state  = 'downloading'
-            libo_status = u8("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 zzlib...")
-            libo_progress[0] = 0.0
+
+        installer_start_download = function()
+            installer_state  = 'downloading'
+            installer_status_text = u8("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 zzlib...")
+            installer_progress[0] = 0.0
             lua_thread.create(function()
                 local dl = require('moonloader').download_status
                 local step = 0
-                local total_steps = nav_missing and 6 or 5
-                local failed = false
-
-                local function await_download(url, dest)
+                local navmesh_only_missing = nav_missing and #missing == 1
+                local install_total_steps = navmesh_only_missing and 2 or (nav_missing and 6 or 5)                local function await_download(url, dest)
                     local done = false
                     local err  = false
                     downloadUrlToFile(url, dest, function(_, st, got, tot)
@@ -156,58 +161,81 @@ if libs_missing then
                     while not done and not err do wait(100) end
                     return not err
                 end
-
-                local function next_step(status)
+                local function install_next_step(status)
                     step = step + 1
-                    libo_progress[0] = step / total_steps
-                    libo_status = u8(status)
+                    installer_progress[0] = step / install_total_steps
+                    installer_status_text = u8(status)
                 end
-                libo_status = u8("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 zzlib.lua...")
+                installer_status_text = u8("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 zzlib.lua...")
                 if not await_download(ZZLIB_URL, lib_path .. "zzlib.lua") then
-                    libo_state = 'error'; libo_status = u8("\xCE\xF8\xE8\xE1\xEA\xE0: zzlib.lua"); return
+                    installer_state = 'error'; installer_status_text = u8("\xCE\xF8\xE8\xE1\xEA\xE0: zzlib.lua"); return
                 end
-                next_step(u8("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 inflate-bwo.lua..."))
+                install_next_step("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 inflate-bwo.lua...")
                 if not await_download(INFLATE1_URL, lib_path .. "inflate-bwo.lua") then
-                    libo_state = 'error'; libo_status = u8("\xCE\xF8\xE8\xE1\xEA\xE0: inflate-bwo.lua"); return
+                    installer_state = 'error'; installer_status_text = u8("\xCE\xF8\xE8\xE1\xEA\xE0: inflate-bwo.lua"); return
                 end
-                next_step(u8("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 inflate-bit32.lua..."))
+                install_next_step("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 inflate-bit32.lua...")
                 if not await_download(INFLATE2_URL, lib_path .. "inflate-bit32.lua") then
-                    libo_state = 'error'; libo_status = u8("\xCE\xF8\xE8\xE1\xEA\xE0: inflate-bit32.lua"); return
+                    installer_state = 'error'; installer_status_text = u8("\xCE\xF8\xE8\xE1\xEA\xE0: inflate-bit32.lua"); return
                 end
-                next_step(u8("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 \xE1\xE8\xE1\xEB\xE8\xEE\xF2\xE5\xEA..."))
+                install_next_step("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 \xE1\xE8\xE1\xEB\xE8\xEE\xF2\xE5\xEA...")
                 local ok, err = load_zzlib()
                 if not ok then
-                    libo_state = 'error'; libo_status = u8("\xCE\xF8\xE8\xE1\xEA\xE0 \xE7\xE0\xE3\xF0\xF3\xE7\xEA\xE8 zzlib: ") .. tostring(err); return
+                    installer_state = 'error'; installer_status_text = u8("\xCE\xF8\xE8\xE1\xEA\xE0 \xE7\xE0\xE3\xF0\xF3\xE7\xEA\xE8 zzlib: ") .. tostring(err); return
                 end
-                if not await_download(LIBS_URL, zip1) then
-                    libo_state = 'error'; libo_status = u8("\xCE\xF8\xE8\xE1\xEA\xE0: lesobot_libs.zip"); return
-                end
-                next_step(u8("\xD0\xE0\xF1\xEF\xE0\xEA\xEE\xE2\xEA\xE0 \xE1\xE8\xE1\xEB\xE8\xEE\xF2\xE5\xEA..."))
-                local ok2, err2 = pcall(zzlib.unzip_full_archive_files, zip1, ml_path)
-                if not ok2 then
-                    libo_state = 'error'; libo_status = u8("\xCE\xF8\xE8\xE1\xEA\xE0 \xF0\xE0\xF1\xEF\xE0\xEA\xEE\xE2\xEA\xE8 libs: ") .. tostring(err2); return
-                end
-                pcall(os.remove, zip1)
+                if not navmesh_only_missing then
+                    if not await_download(LIBS_URL, libs_zip_path) then
+                        installer_state = 'error'; installer_status_text = u8("\xCE\xF8\xE8\xE1\xEA\xE0: lesobot_libs.zip"); return
+                    end
+                    install_next_step("\xD0\xE0\xF1\xEF\xE0\xEA\xEE\xE2\xEA\xE0 \xE1\xE8\xE1\xEB\xE8\xEE\xF2\xE5\xEA...")
+                    local missing_set = {}
+                    for _, lib in ipairs(missing) do
+                        local fname = lib:match("([^%.]+)$") .. ".lua"
+                        missing_set[fname] = true
+                        missing_set[lib] = true
+                    end
+                    local function is_needed(entry_name)
+                        local filename = entry_name:match("([^/\\\\]+)$")
+                        return missing_set[filename] == true
+                    end
+                    local zip1_entries = zzlib.get_zip_entries(libs_zip_path)
+                    for _, entry in ipairs(zip1_entries) do
+                        if entry.type == "directory" then
+                            createDirectory(ml_path .. "\\" .. entry.name)
+                        elseif is_needed(entry.name) then
+                            local dir = entry.name:match("(.*[/\\\\])") or ""
+                            dir = dir:gsub("[/\\\\]$", "")
+                            local out_dir = ml_path .. "\\lib"
+                            if dir ~= "" then out_dir = out_dir .. "\\" .. dir end
+                            zzlib.unzip_entry(libs_zip_path, entry.name, out_dir)
+                        end
+                    end
+                    pcall(os.remove, libs_zip_path)
+                    package.loaded["zzlib"] = nil
+                    package.loaded["inflate-bit32"] = nil
+                    package.loaded["inflate-bwo"] = nil
+                    local ok_r, err_r = load_zzlib()
+                    if not ok_r then
+                        installer_state = 'error'; installer_status_text = u8("\xCE\xF8\xE8\xE1\xEA\xE0 \xEF\xEE\xF1\xEB\xE5 \xF0\xE0\xF1\xEF\xE0\xEA\xEE\xE2\xEA\xE8: ") .. tostring(err_r); return
+                    end
 
+                end
                 if not nav_missing then
-                    libo_state  = 'done'
-                    libo_status = u8("\xC3\xEE\xF2\xEE\xE2\xEE!")
-                    libo_progress[0] = 1.0
+                    installer_state  = 'done'
+                    installer_status_text = u8("\xC3\xEE\xF2\xEE\xE2\xEE!")
+                    installer_progress[0] = 1.0
                     return
                 end
-                next_step(u8("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 navmesh..."))
-                if not await_download(NAVMESH_URL, zip2) then
-                    libo_state = 'error'; libo_status = u8("\xCE\xF8\xE8\xE1\xEA\xE0: navmesh.zip"); return
+                install_next_step("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 navmesh...")
+                if not await_download(NAVMESH_URL, navmesh_zip_tmp_path) then
+                    installer_state = 'error'; installer_status_text = u8("\xCE\xF8\xE8\xE1\xEA\xE0: navmesh.zip"); return
                 end
-                next_step(u8("\xD0\xE0\xF1\xEF\xE0\xEA\xEE\xE2\xEA\xE0 navmesh..."))
-                local ok3, err3 = pcall(zzlib.unzip_full_archive_files, zip2, ml_path)
-                if not ok3 then
-                    libo_state = 'error'; libo_status = u8("\xCE\xF8\xE8\xE1\xEA\xE0 \xF0\xE0\xF1\xEF\xE0\xEA\xEE\xE2\xEA\xE8 navmesh: ") .. tostring(err3); return
-                end
-                pcall(os.remove, zip2)
-                libo_state  = 'done'
-                libo_status = u8("\xC3\xEE\xF2\xEE\xE2\xEE!")
-                libo_progress[0] = 1.0
+                install_next_step("\xD0\xE0\xF1\xEF\xE0\xEA\xEE\xE2\xEA\xE0 navmesh...")
+                zzlib.unzip_full_archive_files(navmesh_zip_tmp_path, ml_path)
+                pcall(os.remove, navmesh_zip_tmp_path)
+                installer_state  = 'done'
+                installer_status_text = u8("\xC3\xEE\xF2\xEE\xE2\xEE!")
+                installer_progress[0] = 1.0
             end)
         end
 
@@ -229,9 +257,9 @@ if libs_missing then
             return r, g, b
         end
 
-        libo_register_frame = function()
+        installer_register_frame = function()
             try_load_logo()
-            im.OnFrame(function() return libo_show_win[0] end, function()
+            im.OnFrame(function() return installer_window_open[0] end, function()
                 local sw, sh = getScreenResolution()
                 rgb_hue = (rgb_hue + 0.004) % 1.0
                 local rr, rg, rb = hue2rgb(rgb_hue)
@@ -244,7 +272,7 @@ if libs_missing then
                 local WIN_H = 286
                 im.SetNextWindowPos(im.ImVec2(sw/2, sh/2), im.Cond.Always, im.ImVec2(0.5, 0.5))
                 im.SetNextWindowSize(im.ImVec2(WIN_W, WIN_H), im.Cond.Always)
-                im.Begin('##lb_missing', libo_show_win, im.WindowFlags.NoMove + im.WindowFlags.NoResize + im.WindowFlags.NoCollapse + im.WindowFlags.NoTitleBar)
+                im.Begin('##lb_missing', installer_window_open, im.WindowFlags.NoMove + im.WindowFlags.NoResize + im.WindowFlags.NoCollapse + im.WindowFlags.NoTitleBar)
                 local wp   = im.GetWindowPos()
                 local ws   = im.GetWindowSize()
                 local draw = im.GetWindowDrawList()
@@ -264,7 +292,6 @@ if libs_missing then
                     im.ImVec2(wp.x + ws.x, wp.y + ws.y),
                     im.ColorConvertFloat4ToU32(im.ImVec4(rr, rg, rb, 1.0)),
                     0, 0, 1.5)
-
                 local PAD       = 16
                 local LOGO_W    = WIN_H - PAD * 2
                 local LOGO_H    = LOGO_W -10
@@ -284,11 +311,11 @@ if libs_missing then
                     im.Text('...')
                     im.PopStyleColor()
                 end
-                local ver_str = 'v' .. tostring(thisScript and thisScript().version or '?')
-                local ver_w   = im.CalcTextSize(ver_str).x
+                local version_label = 'v' .. tostring(thisScript and thisScript().version or '?')
+                local ver_w   = im.CalcTextSize(version_label).x
                 im.SetCursorPos(im.ImVec2(PAD + (LOGO_W - ver_w) * 0.5, PAD + LOGO_H + 4))
                 im.PushStyleColor(im.Col.Text, im.ImVec4(0.35, 0.35, 0.45, 1))
-                im.Text(ver_str)
+                im.Text(version_label)
                 im.PopStyleColor()
                 local div_x = PAD + LOGO_W + PAD
                 local div_r, div_g, div_b = hue2rgb((rgb_hue + 0.45) % 1.0)
@@ -296,22 +323,18 @@ if libs_missing then
                     im.ImVec2(wp.x + div_x, wp.y + 16),
                     im.ImVec2(wp.x + div_x, wp.y + WIN_H - 16),
                     im.ColorConvertFloat4ToU32(im.ImVec4(div_r, div_g, div_b, 0.35)), 1.0)
-
                 im.SetCursorPos(im.ImVec2(content_x, 18))
                 im.PushStyleColor(im.Col.Text, im.ImVec4(0.95, 0.95, 1.0, 1))
-                im.Text('LesoRub BOT')
+                im.Text(u8("Leso\xD0\xF3\xE1 \xE1\xEE\xF2"))
                 im.PopStyleColor()
-
                 im.SetCursorPos(im.ImVec2(content_x, 38))
                 im.PushStyleColor(im.Col.Text, im.ImVec4(0.50, 0.50, 0.62, 1))
                 im.Text(u8("\xCE\xF2\xF1\xF3\xF2\xF1\xF2\xE2\xF3\xFE\xF2 \xE1\xE8\xE1\xEB\xE8\xEE\xF2\xE5\xEA\xE8"))
                 im.PopStyleColor()
-
                 draw:AddLine(
                     im.ImVec2(wp.x + content_x, wp.y + 60),
                     im.ImVec2(wp.x + win_w - PAD, wp.y + 60),
                     im.ColorConvertFloat4ToU32(im.ImVec4(0.22, 0.22, 0.32, 1)), 1.0)
-
                 local ly = 70
                 im.PushStyleColor(im.Col.Text, im.ImVec4(1.0, 0.60, 0.18, 1))
                 for i, lib in ipairs(missing) do
@@ -321,7 +344,7 @@ if libs_missing then
                 im.PopStyleColor()
                 local btn_y = ly + #missing * 19 + 16
                 im.SetCursorPos(im.ImVec2(content_x, btn_y))
-                if libo_state == 'idle' then
+                if installer_state == 'idle' then
                     im.PushStyleColor(im.Col.Text, im.ImVec4(0.55, 0.55, 0.68, 1))
                     im.Text(u8("\xC0\xE2\xF2\xEE\xF3\xF1\xF2\xE0\xED\xEE\xE2\xEA\xE0 \xF1 GitHub:"))
                     im.PopStyleColor()
@@ -332,43 +355,75 @@ if libs_missing then
                     im.PushStyleColor(im.Col.ButtonActive,  im.ImVec4(0.10, 0.10, 0.18, 1.0))
                     im.PushStyleColor(im.Col.Text,          im.ImVec4(0.90, 0.90, 0.95, 1.0))
                     if im.Button(u8("\xD1\xEA\xE0\xF7\xE0\xF2\xFC \xE1\xE8\xE1\xEB\xE8\xEE\xF2\xE5\xEA\xE8"), im.ImVec2(bw, 40)) then
-                        lua_thread.create(libo_start_dl)
+                        lua_thread.create(installer_start_download)
                     end
                     im.PopStyleColor(4)
-
-                elseif libo_state == 'downloading' then
+                elseif installer_state == 'downloading' then
                     im.PushStyleColor(im.Col.Text, im.ImVec4(1, 1, 0.3, 1))
-                    im.Text(libo_status)
+                    im.Text(installer_status_text)
                     im.PopStyleColor()
-                    im.SetCursorPos(im.ImVec2(content_x, btn_y + 22))
                     local bw2 = win_w - content_x - PAD
-                    im.PushStyleColor(im.Col.PlotHistogram, im.ImVec4(rr, rg, rb, 1))
-                    im.PushStyleColor(im.Col.FrameBg,       im.ImVec4(0.10, 0.10, 0.16, 1))
-                    im.ProgressBar(libo_progress[0], im.ImVec2(bw2, 22), '')
-                    im.PopStyleColor(2)
-
-                elseif libo_state == 'done' then
-                    _t = _t or os.clock()
-                    local s = math.max(0, 5 - (os.clock() - _t))
+                    local spinner_r = 14
+                    local spinner_thickness = 3.0
+                    local spinner_cx = wp.x + content_x + bw2 / 2
+                    local spinner_cy = wp.y + btn_y + 22 + spinner_r + 2
+                    local t = os.clock()
+                    local segments = 48
+                    local arc_frac = 0.65
+                    local speed    = 2.0
+                    local angle_start = (t * speed * math.pi * 2) % (math.pi * 2)
+                    local angle_end   = angle_start + arc_frac * math.pi * 2
+                    draw:AddCircle(
+                        im.ImVec2(spinner_cx, spinner_cy),
+                        spinner_r,
+                        im.ColorConvertFloat4ToU32(im.ImVec4(0.18, 0.18, 0.26, 1)),
+                        segments, spinner_thickness)
+                    local step = (arc_frac * math.pi * 2) / segments
+                    for si = 0, segments - 1 do
+                        local a1 = angle_start + si * step
+                        local a2 = angle_start + (si + 1) * step
+                        local fade = si / segments
+                        local ar = rr * (0.4 + 0.6 * fade)
+                        local ag = rg * (0.4 + 0.6 * fade)
+                        local ab = rb * (0.4 + 0.6 * fade)
+                        local x1 = spinner_cx + math.cos(a1) * spinner_r
+                        local y1 = spinner_cy + math.sin(a1) * spinner_r
+                        local x2 = spinner_cx + math.cos(a2) * spinner_r
+                        local y2 = spinner_cy + math.sin(a2) * spinner_r
+                        draw:AddLine(
+                            im.ImVec2(x1, y1),
+                            im.ImVec2(x2, y2),
+                            im.ColorConvertFloat4ToU32(im.ImVec4(ar, ag, ab, 1.0)),
+                            spinner_thickness)
+                    end
+                    local hx = spinner_cx + math.cos(angle_end) * spinner_r
+                    local hy = spinner_cy + math.sin(angle_end) * spinner_r
+                    draw:AddCircleFilled(
+                        im.ImVec2(hx, hy), spinner_thickness * 0.9,
+                        im.ColorConvertFloat4ToU32(im.ImVec4(rr, rg, rb, 1.0)), 12)
+                    im.SetCursorPos(im.ImVec2(content_x, btn_y + 22))
+                    im.Dummy(im.ImVec2(bw2, spinner_r * 2 + 6))
+                elseif installer_state == 'done' then
+                    reload_timer = reload_timer or os.clock()
+                    local s = math.max(0, 5 - (os.clock() - reload_timer))
                     if s <= 0 then thisScript():reload() end
                     im.PushStyleColor(im.Col.Text, im.ImVec4(0.2, 1, 0.4, 1))
                     im.Text(u8("\xD3\xF1\xF2\xE0\xED\xEE\xE2\xEB\xE5\xED\xEE!"))
                     im.PopStyleColor()
                     im.SetCursorPos(im.ImVec2(content_x, btn_y + 22))
                     im.PushStyleColor(im.Col.Text, im.ImVec4(1, 1, 0.3, 1))
-                    im.Text(u8("\xCF\xE5\xF0\xE5\xE7\xE0\xEF\xF3\xF1\xEA \xF7\xE5\xF0\xE5\xE7 ") .. tostring(s) .. u8(" \xF1\xE5\xEA..."))
+                    im.Text(u8("\xCF\xE5\xF0\xE5\xE7\xE0\xEF\xF3\xF1\xEA \xF7\xE5\xF0\xE5\xE7 ") .. tostring(math.ceil(s)) .. u8(" \xF1\xE5\xEA..."))
                     im.PopStyleColor()
 
-                elseif libo_state == 'error' then
+                elseif installer_state == 'error' then
                     im.PushStyleColor(im.Col.Text, im.ImVec4(1, 0.25, 0.25, 1))
-                    im.Text(u8("\xCE\xF8\xE8\xE1\xEA\xE0: ") .. libo_status)
+                    im.Text(u8("\xCE\xF8\xE8\xE1\xEA\xE0: ") .. installer_status_text)
                     im.PopStyleColor()
                     im.SetCursorPos(im.ImVec2(content_x, btn_y + 22))
                     im.PushStyleColor(im.Col.Text, im.ImVec4(0.45, 0.45, 0.55, 1))
                     im.TextWrapped(u8("\xD1\xEA\xE0\xF7\xE0\xF9\xE8\xF5 \xE2\xF0\xF3\xF7\xED\xF3\xFE: github.com/flupiflufi1/popa/releases"))
                     im.PopStyleColor()
                 end
-
                 im.End()
                 im.PopStyleColor(3)
             end)
@@ -382,7 +437,24 @@ local UPDATE_LATEST_VER  = ""
 local update_available   = nil
 local update_check_done  = false
 local update_popup_shown = false
-local upd_popup_open     = imgui.new.bool(true)
+local script_update_popup_open     = imgui.new.bool(true)
+
+local NAVMESH_CURRENT_VER   = "unknown"
+local NAVMESH_LATEST_VER    = ""
+local NAVMESH_DOWNLOAD_URL  = ""
+local navmesh_update_available   = nil
+local navmesh_update_popup_shown = false
+local navmesh_update_popup_open     = imgui.new.bool(true)
+
+local function get_navmesh_local_ver()
+    local ok, nav_cfg = pcall(require, "navmesh.config")
+    if ok and nav_cfg and nav_cfg.version then
+        return nav_cfg.version
+    end
+    return "unknown"
+end
+
+NAVMESH_CURRENT_VER = get_navmesh_local_ver()
 
 local function check_version_silent()
     lua_thread.create(function()
@@ -414,6 +486,17 @@ local function check_version_silent()
                     else
                         update_available = false
                     end
+                    if vdata.navmesh and vdata.navmeshobnova then
+                        NAVMESH_LATEST_VER   = vdata.navmesh
+                        NAVMESH_DOWNLOAD_URL = vdata.navmeshobnova
+                        if vdata.navmesh ~= NAVMESH_CURRENT_VER then
+                            navmesh_update_available = true
+                        else
+                            navmesh_update_available = false
+                        end
+                    else
+                        navmesh_update_available = false
+                    end
                 else
                     update_available = false
                 end
@@ -427,6 +510,7 @@ local function check_version_silent()
         update_check_done = true
     end)
 end
+
 if not libs_missing then
     NavMesh = require("navmesh.navmesh")
     nav_movement = require("navmesh.movement")
@@ -437,7 +521,6 @@ local new = imgui.new
 local iv2 = imgui.ImVec2
 local iv4 = imgui.ImVec4
 
--- Г—Г Г±ГІГЁГ¶Г» Г­Г  ГІГҐГ«ГҐГ¦ГЄГҐ (Г±Г®Г§Г¤Г ГѕГІГ±Гї Г«ГҐГ­ГЁГўГ® ГЇГ°ГЁ ГЇГҐГ°ГўГ®Г¬ ГЄГ Г¤Г°ГҐ)
 local telega_particles = nil
 local function get_telega_particles()
     if not ok_particles then return nil end
@@ -461,29 +544,47 @@ local function get_telega_particles()
     end
     return telega_particles
 end
+
 local conv_c = imgui.ColorConvertFloat4ToU32
 local need_find_telega = false
 local need_find_telega_time = 0
 local has_telega = false
 local safe_point_away = {x = -502.42962646484, y = -182.15553283691, z = 77.370460510254}
-local safe_point = {-502.42962646484, -182.15553283691, 77.370460510254}
 local sdacha_points = {
     {x = -498.21423339844, y = -200.26248168945, z = 78.761642456055},
     {x = -557.31085205078, y = -199.52032470703, z = 78.531639099121}
 }
 
-local new_points = {
-    {x = -479.8229, y = -160.3730, z = 77.2529}, {x = -480.9420, y = -169.5446, z = 78.2109}, {x = -481.4666, y = -183.4663, z = 78.1901}
-}
 local ignore_trees = {
     {-562, -135, 72},
     {-575, -164, 78},
     {-456, -162, 76},
     {-542, -142, 74}
 }
+
+local near_zone_trees = {
+    {-470.24, -121.97, 62.97},
+    {-444.63, -119.02, 61.46},
+    {-475.98, -154.01, 73.65},
+    {-435.24, -153.45, 71.01},
+    {-495.38, -127.08, 65.48},
+    {-477.46, -57.97, 59.11},
+    {-548.49, -132.31, 68.71},
+    {-549.56, -20.07, 61.93},
+}
+
+local function isNearZoneTree(x, y, z)
+    for _, v in ipairs(near_zone_trees) do
+        local d = getDistanceBetweenCoords2d(x, y, v[1], v[2])
+        if d < 20.0 then return true end
+    end
+    return false
+end
+
 local pickup_telega_pos = nil
 local next_telega_pos = nil
 local pickup_telega_skip_check = false
+local my_tree_cut = false
 local saved_tree_points = nil
 local saved_tree_point_idx = 1
 
@@ -588,7 +689,7 @@ local all_anims = {
     "woman_walkpro", "woman_walksexy", "woman_walkshop", "xpressscratch"
 }
  
---ГЄГ®Г«ГЁГ§ГЁГї
+--calocollision
 local mainIni = {
     act = {
         cmd = "col",
@@ -757,6 +858,9 @@ cVARS = {
     antiadmin_blinking = new.bool(config.antiadmin_blinking),
     antiadmin_autoExit = new.bool(config.antiadmin_autoExit),
     antibot_antifreeze = new.bool(config.antibot_antifreeze),
+    minigame_rage_mode = new.bool(config.minigame_rage_mode or false),
+    minigame_pct_min = new.int(config.minigame_pct_min or 80),
+    minigame_pct_max = new.int(config.minigame_pct_max or 100),
     antiadmin_skipdialog = new.bool(config.antiadmin_skipdialog),
     antiadmin_warningsey = new.bool(config.antiadmin_warningsey),
     antiadmin_skip11 = new.int(config.antiadmin_skip11),
@@ -781,6 +885,8 @@ cVARS = {
     antiadmin_play_sound = new.bool(config.antiadmin_play_sound),
     avatar_path = new.char[256]("avatar.png"),
     telegram_api_url = new.char[256]("https://api.telegram.org"),
+    tree_zone_mode = new.int(config.tree_zone_mode or 0),
+    player_ignore_mode = new.int(config.player_ignore_mode or 0),
 }
  
 ffi.copy(cVARS.menu_command, config.menu_command)
@@ -806,11 +912,10 @@ local sdacha_names = {
     u8("\xC2\xF2\xEE\xF0\xE0\xFF \xF2\xEE\xF7\xEA\xE0 \xF1\xE4\xE0\xF7\xE8"),
 }
 
---ГўГ±ГїГЄГ Гї ГµГҐГ°Гј Г«Г®ГЄГ Г«ГјГ­Г Гї ГЎГ°ГіГµ
+-- localnaya zalupa
 local ImItems_sdacha = imgui.new['const char*'][#sdacha_names](sdacha_names)
 local selected_sdacha = nil
 local current_new_point_index = 1
-local selected_new_points = {}
 local cumshot = false
 local turnleft = false
 local turnright = false
@@ -824,18 +929,22 @@ local gradient_offset = 0
 local menu_open_time = nil
 local menu_anim_duration = 0.45
 local satiety
+local sawmill_hidden = false
 local walking = false
-local formatScreenshot = '.jpg'
 local selected_tab = u8("\xC3\xEB\xE0\xE2\xED\xE0\xFF")
 local token = ""
 local chat_id = ""
 local updateid = nil
-local audio = nil
 local audiostream_state = require('moonloader').audiostream_state
 local alert_audio = nil
  
 local last_fix_zabor_id = 1
 local bot_state = "IDLE"
+
+local function go_search_tree()
+    state_entered["SEARCH_TREE"] = false
+    bot_state = "SEARCH_TREE"
+end
 
 local nav = nil
 local nav_current_path = nil
@@ -898,6 +1007,17 @@ local method = {
     u8("\xCE\xEB\xE5\xED\xE8\xED\xE0")
 }
 
+local ign_items = {
+    u8("\xCE\xE1\xFB\xF7\xED\xFB\xE9 \x28\xE8\xE3\xED\xEE\xF0 2+ \xE8\xE3\xF0\xEE\xEA\xEE\xE2\x29"), 
+    u8("\xD1\xF2\xF0\xEE\xE3\xE8\xE9 \x28\xE8\xE3\xED\xEE\xF0 1+ \xE8\xE3\xF0\xEE\xEA\xEE\xE2\x29")
+}
+local zone_items = {
+    u8("\xC1\xEB\xE8\xE6\xED\xE8\xE5"), 
+    u8("\xC4\xE0\xEB\xFC\xED\xE8\xE5"), 
+    u8("\xD0\xE0\xED\xE4\xEE\xEC")
+}
+local ImItems_zone = imgui.new['const char*'][#zone_items](zone_items)
+local ImItems_ign = imgui.new['const char*'][#ign_items](ign_items)
 local ImItems = imgui.new['const char*'][#method](method)
 ffi.cdef [[
     typedef int BOOL;
@@ -939,7 +1059,6 @@ local tree_circle_direction = 1
 function generateTreeAvoidCircle(center_x, center_y, center_z, radius, num_points)
     local points = {}
     local step = (2 * math.pi) / num_points
-    
     for i = 0, num_points - 1 do
         local angle = i * step
         local x = center_x + math.cos(angle) * radius
@@ -1010,7 +1129,6 @@ function applyAnimationSpeed()
     end
 end
  
---ГЄГ°Г Г±ГЁГўГ® Г­Г Г±Г°Г Г« ГЇГ ГЄГҐГІГ Г¬ГЁ ГЄГ Г±ГІГ®Г¬Г­Г»Г¬ГЁ
 function sendCustomPacket(text)
     local bs = raknetNewBitStream()
     raknetBitStreamWriteInt8(bs, 220)
@@ -1134,7 +1252,6 @@ function getNearestTreeCenter(target_x, target_y, target_z)
             nearest = center
         end
     end
-    
     return nearest, min_dist
 end
 
@@ -1177,18 +1294,27 @@ function pushTask(fn)
     taskQueue[#taskQueue + 1] = fn
 end
 
+local function getNumberByChance(pct)
+    return 54 + (95 - pct) / 2.1
+end
+
 function performTurn()
     if not autoEnabled or isProcessingTurn or currentWidth == 0 then
         return
     end
     isProcessingTurn = true
-    local pos = math.floor(currentStart + currentWidth / 2 + 0.5)
-    local whatisthis = math.floor((pos - currentStart) / currentWidth * 100 + 0.5)
+    local pct_min = cVARS.minigame_pct_min[0]
+    local pct_max = cVARS.minigame_pct_max[0]
+    if pct_min > pct_max then pct_min, pct_max = pct_max, pct_min end
+    local pos = math.floor(currentStart + currentWidth/2 + 0.5)
+    local randomPct = math.random(pct_min, pct_max)
+    local whatisthis = math.floor(getNumberByChance(randomPct) + 0.5)
     pushTask(function()
         sendCustomPacket("lumbering-game.start")
-        local speed = currentWidth > 0 and currentWidth or 1
+        local speed = currentSpeed > 0 and currentSpeed or 1
         local waitTime = math.floor(pos / speed + 0.5) * 75
-        wait(waitTime)
+        local rageMode = cVARS.minigame_rage_mode[0]
+        wait(rageMode and 50 or waitTime)
         sendCustomPacket(string.format(
             "lumbering-game.turnEnd|%d|%d",
             pos,
@@ -1206,7 +1332,7 @@ function findTelegaIn3DText()
     for id = 0, 2048 do
         if sampIs3dTextDefined(id) then
             local t, c, posX, posY, posZ = sampGet3dTextInfoById(id)
-            if t and t:find(u8("\xC4\xF0\xEE\xE2\xE0:")) then
+            if t and t:find("\xC4\xF0\xEE\xE2\xE0:") then
                 local dist = getDistanceBetweenCoords3d(posX, posY, posZ, mX, mY, mZ)
                 if dist < best_dist then
                     best_dist = dist
@@ -1215,19 +1341,31 @@ function findTelegaIn3DText()
             end
         end
     end
-    if best_pos then
-        --sampAddChatMessage("[BOT] telega: " .. math.floor(best_pos[1]) .. " " .. math.floor(best_pos[2]) .. " d:" .. math.floor(best_dist), 0x00FF00)
-    else
-        --sampAddChatMessage("[BOT] telega NOT found", 0xFF4444)
-    end
     return best_pos
 end
 
 function main()
     math.randomseed(os.time())
     if libs_missing then
-        if libo_register_frame then libo_register_frame() end
-        while libo_show_win and libo_show_win[0] do wait(100) end
+        if installer_register_frame then installer_register_frame() end
+        if isSampfuncsLoaded and isSampfuncsLoaded() then
+            while not (isSampLoaded and isSampLoaded() and isSampAvailable and isSampAvailable()) do wait(500) end
+            local cmd = "sawbot"
+            local ok_cfg, cfg_raw = pcall(function()
+                local f = io.open(getWorkingDirectory() .. "\\config\\lesorub_config.json", "r")
+                if not f then return nil end
+                local s = f:read("*a"); f:close(); return s
+            end)
+            if ok_cfg and cfg_raw then
+                local ok_j, jd = pcall(decodeJson, cfg_raw)
+                if ok_j and jd and jd.menu_command then cmd = jd.menu_command end
+            end
+            cMsg("\xCD\xE5\xEA\xEE\xF2\xEE\xF0\xFB\xE5 \xE1\xE8\xE1\xEB\xE8\xEE\xF2\xE5\xEA\xE8 \xED\xE5 \xED\xE0\xE9\xE4\xE5\xED\xFB. \xCE\xF2\xEA\xF0\xEE\xE9 \xEC\xE5\xED\xFE: /" .. cmd)
+            sampRegisterChatCommand(cmd, function()
+                installer_window_open[0] = not installer_window_open[0]
+            end)
+        end
+        while true do wait(200) end
         return
     end
     if not isSampfuncsLoaded() or not isSampLoaded() then return end
@@ -1369,7 +1507,7 @@ function main()
                 end
             end
         end
-        --ГЄГ®Г«ГЁГ§ГЁГї
+        --calocolission
         if object[0] then
             for k, v in ipairs(getAllObjects()) do
                 if doesObjectExist(v) then
@@ -1427,8 +1565,7 @@ function main()
                 end
             end
         end
-                
-        --ГЄГ®Г«ГЁГ§ГЁГї
+
         if changepos then
             sampToggleCursor(true)
             local x, y = getCursorPos()
@@ -1466,7 +1603,6 @@ function main()
                     need_find_telega = false
                     if has_telega then
                         next_telega_pos = pos
-                        --sampAddChatMessage("[BOT] next telega saved, will pick after delivery", 0xFFAA00)
                     else
                         pickup_telega_pos = pos
                         pickup_telega_skip_check = false
@@ -1476,18 +1612,19 @@ function main()
                     end
                 elseif os.clock() - need_find_telega_time > 8.0 then
                     need_find_telega = false
-                    --sampAddChatMessage("[BOT] telega search timeout", 0xFF4444)
                 end
             end
             local f, tree = getNearestTree()
             if bot_state == "IDLE" then
-                bot_state = "SEARCH_TREE"
+                my_tree_cut = false
+                next_telega_pos = nil
+                go_search_tree()
             elseif bot_state == "SCAN_FOR_TREE" then
                 local f, tree = getNearestTree()
             
                 if f then
                     nav_scan_target_angle = nil
-                    bot_state = "SEARCH_TREE"
+                    go_search_tree()
                 else
                     if not current_cam_angle then current_cam_angle = 0.0 end
                     if not nav_scan_target_angle then nav_scan_target_angle = current_cam_angle end
@@ -1544,11 +1681,10 @@ function main()
                             end
                         end
                         if not telega_still_exists then
-                            --sampAddChatMessage("[BOT] telega gone (taken by another player), searching tree", 0xFF4444)
                             pickup_telega_pos = nil
                             pickup_telega_skip_check = false
                             state_entered["PICKUP_TELEGA"] = false
-                            bot_state = "SEARCH_TREE"
+                            go_search_tree()
                             goto continue_state
                         end
                     end
@@ -1580,7 +1716,7 @@ function main()
                     pickup_telega_pos = nil
                     pickup_telega_skip_check = false
                     state_entered["PICKUP_TELEGA"] = false
-                    bot_state = "SEARCH_TREE"
+                    go_search_tree()
                 end
                 ::continue_state::
             elseif bot_state == "RUN_SDACHA" then
@@ -1600,10 +1736,10 @@ function main()
                         resetNavPath()
                         bot_state = "PICKUP_TELEGA"
                     else
-                        bot_state = "SEARCH_TREE"
+                        go_search_tree()
                     end
                 else
-                    if not next_telega_pos and current_tree_points and #current_tree_points > 0 then
+                    if not next_telega_pos and my_tree_cut and current_tree_points and #current_tree_points > 0 then
                         local pt = current_tree_points[current_tree_point_idx] or current_tree_points[1]
                         if pt then
                             local found, tdx, tdy, tdz = hasDrovaLabelNear(pt[1], pt[2], pt[3], 80)
@@ -1644,31 +1780,24 @@ function main()
                 navRunToPoint(-518.3679, -185.5178, 78.0082, true)
                 local return_distance = distPoint(-518.3679, -185.5178, 78.0082)
                 if return_distance < 1.5 then
-                    bot_state = "SEARCH_TREE"
+                    go_search_tree()
                 end
             elseif bot_state == "SEARCH_TREE" then
-                local f, pts = getNearestTree()
-                if f then
-                    local center_x, center_y, center_z = pts[1][1], pts[1][2], pts[1][3]
-                    local has_drova, dx, dy, dz = hasDrovaLabelNear(center_x, center_y, center_z, 50)
-                    
-                    if has_drova and not has_telega then
-                        pickup_telega_pos = {dx, dy, dz}
-                        saved_tree_points = pts
-                        saved_tree_point_idx = 1
-                        resetNavPath()
-                        bot_state = "PICKUP_TELEGA"
-                        state_entered["PICKUP_TELEGA"] = false
-                    else
+                if not state_entered["SEARCH_TREE"] then
+                    local f, pts = getNearestTree()
+                    if f then
+                        state_entered["SEARCH_TREE"] = true
                         current_tree_points = pts
                         current_tree_point_idx = 1
                         minigame_running = false
-                        local pt = current_tree_points[1]
-                        navRunToPoint(pt[1], pt[2], pt[3], true)
-                        -- Г¦Г¤ВёГ¬ showModal Г®ГІ Г±ГҐГ°ГўГҐГ°Г , showModal Г±Г Г¬ ГЇГҐГ°ГҐГЄГ«ГѕГ·ГЁГІ Гў PLAY_MINIGAME
+                        my_tree_cut = false
+                    else
+                        bot_state = "SCAN_FOR_TREE"
                     end
-                else
-                    bot_state = "SCAN_FOR_TREE"
+                end
+                if state_entered["SEARCH_TREE"] and current_tree_points and current_tree_points[1] then
+                    local pt = current_tree_points[1]
+                    navRunToPoint(pt[1], pt[2], pt[3], true)
                 end
             elseif bot_state == "PLAY_MINIGAME" then
                 if not state_entered["PLAY_MINIGAME"] then
@@ -1696,7 +1825,7 @@ function main()
                     partner_absent = false
                     waiting_for_my_turn = false
                     my_turn_ready = false
-                    bot_state = "SEARCH_TREE"
+                    go_search_tree()
                     state_entered["PLAY_MINIGAME"] = false
                 end
                 if not minigame_running and minigame_done_time > 0 then
@@ -1713,7 +1842,6 @@ function main()
                             if partner_absent then
                                 any_avail_idx = next_idx
                                 partner_absent = false
-                                --sampAddChatMessage("[BOT] partner was absent, going to other point", 0x00FF00)
                             elseif next_pt and isPointAvailable(next_pt[1], next_pt[2], next_pt[3]) then
                                 any_avail_idx = next_idx
                             else
@@ -1866,12 +1994,9 @@ function main()
                 local px, py, pz = getCharCoordinates(PLAYER_PED)
                 local tx, ty, tz = target_pt[1], target_pt[2], target_pt[3]
                 local dist_to_target = getDistanceBetweenCoords3d(px, py, pz, tx, ty, tz)
-
                 if dist_to_target < 4.0 then
                     runToPoint(tx, ty, tz)
-
                     if dist_to_target < 1.65 then
-                        -- Г¦Г¤ВёГ¬ showModal Г®ГІ Г±ГҐГ°ГўГҐГ°Г , Г®Г­ Г±Г Г¬ ГЇГҐГ°ГҐГЄГ«ГѕГ·ГЁГІ Гў PLAY_MINIGAME
                         tree_avoid_circle_points = {}
                         tree_avoid_circle_index = 1
                     end
@@ -1936,7 +2061,7 @@ function main()
                 if os.clock() - set_wait_alt > 45 then
                     state_entered["WAIT_TELEGA"] = false
                     current_tree_points = {}
-                    bot_state = "SEARCH_TREE"
+                    go_search_tree()
                 end
             elseif bot_state == "ESCAPE_VEHICLE" then
                 if not state_entered["ESCAPE_VEHICLE"] then
@@ -1948,7 +2073,7 @@ function main()
                     cVARS.bot[0] = false
                     bot_state = "IDLE"
                     if cVARS.telegram[0] then
-                        sendTelegramNotification(u8("\xC4\xEE\xF1\xF2\xE8\xE3\xED\xF3\xF2\xE0 \xE1\xE5\xE7\xEE\xEF\xE0\xF1\xED\xE0\xFF \xF2\xEE\xF7\xEA\xE0. \xC1\xEE\xF2 \xE2\xFB\xEA\xEB\xFE\xF7\xE5\xED."))
+                        sendTelegramNotification("\xC4\xEE\xF1\xF2\xE8\xE3\xED\xF3\xF2\xE0 \xE1\xE5\xE7\xEE\xEF\xE0\xF1\xED\xE0\xFF \xF2\xEE\xF7\xEA\xE0. \xC1\xEE\xF2 \xE2\xFB\xEA\xEB\xFE\xF7\xE5\xED.")
                     end
                 end
             end
@@ -1996,30 +2121,13 @@ function resetNavPath()
     setGameKeyState(16, 0)
 end
 
-local function getNavLookaheadPoint(path, start_idx, px, py, pz, lookahead_dist)
-    local acc = 0
-    local prev_x, prev_y, prev_z = px, py, pz
-    for i = start_idx, #path do
-        local pt = path[i]
-        local d = getDistanceBetweenCoords3d(prev_x, prev_y, prev_z, pt[1], pt[2], pt[3])
-        acc = acc + d
-        if acc >= lookahead_dist then
-            return pt[1], pt[2], pt[3]
-        end
-        prev_x, prev_y, prev_z = pt[1], pt[2], pt[3]
-    end
-    local last = path[#path]
-    return last[1], last[2], last[3]
-end
-
--- Г‡Г ГЇГ°ГҐГ№ВёГ­Г­Г»ГҐ Г§Г®Г­Г» (ГЄГўГ Г¤Г°Г ГІГ», ГўГ­ГіГІГ°Гј ГЄГ®ГІГ®Г°Г»Гµ ГЎГ®ГІ Г­ГҐ Г§Г ГµГ®Г¤ГЁГІ)
 local FORBIDDEN_ZONES = {
-    {   -- Г‡Г®Г­Г  1
+    {
         minX = -562.574, maxX = -559.206,
         minY = -206.480, maxY = -193.727,
         minZ =   77.0,   maxZ =   80.0,
     },
-    {   -- Г‡Г®Г­Г  2
+    {
         minX = -502.202, maxX = -499.574,
         minY = -206.164, maxY = -194.868,
         minZ =   77.0,   maxZ =   80.0,
@@ -2114,7 +2222,7 @@ function navRunToPoint(x, y, z, use_mesh)
                     nav_detour_fails = 0
                 end
                 if cVARS.debug[0] then
-                    cMsg(string.format("[NAV] FAILED pcall (%.1f,%.1f)->(%.1f,%.1f) seg=%.1f detour=%.0fВ°", startX, startY, tx, ty, nav_segment_size, nav_detour_angle), 0xFF4444)
+                    cMsg(string.format("[NAV] FAILED pcall (%.1f,%.1f)->(%.1f,%.1f) seg=%.1f detour=%.0f\xB0", startX, startY, tx, ty, nav_segment_size, nav_detour_angle), 0xFF4444)
                 end
                 return
             end
@@ -2138,7 +2246,6 @@ function navRunToPoint(x, y, z, use_mesh)
                 local MAX_PTS = 6
                 local added = 0
                 local px2, py2, pz2 = getCharCoordinates(PLAYER_PED)
-                -- skip points already behind the bot
                 local skip_until = 1
                 if #nav_full_path > 0 then
                     local tail = nav_full_path[#nav_full_path]
@@ -2173,7 +2280,7 @@ function navRunToPoint(x, y, z, use_mesh)
                     nav_detour_fails = 0
                 end
                 if cVARS.debug[0] then
-                    cMsg(string.format("[NAV] STUCK (%.1f,%.1f)->(%.1f,%.1f) seg=%.1f goal=(%.1f,%.1f) next_detour=%.0fВ°",
+                    cMsg(string.format("[NAV] STUCK (%.1f,%.1f)->(%.1f,%.1f) seg=%.1f goal=(%.1f,%.1f) next_detour=%.0f\xB0",
                         startX, startY, tx, ty, nav_segment_size, x, y, nav_detour_angle), 0xFFAA00)
                 end
             end
@@ -2284,7 +2391,7 @@ function runToPoint(x, y, z, cam_x, cam_y, cam_z)
                 wait(180)
                 setGameKeyState(14, 0)
                 setGameKeyState(0, 0)
-                sendTelegramNotification(u8("\xC1\xEE\xF2 \xF0\xE0\xF1\xF2\xF0\xFF\xEB \xEF\xEE\xEC\xEE\xE5\xEC\xF3"))
+                sendTelegramNotification("\xC1\xEE\xF2 \xF0\xE0\xF1\xF2\xF0\xFF\xEB \xEF\xEE\xEC\xEE\xE5\xEC\xF3")
                 last_stuck_action_time = now
                 stuck_ticks = stuck_ticks - 2
             end
@@ -2428,28 +2535,8 @@ function isBuildingInFront()
     return false
 end
  
-function isTreeInFov(treeX, treeY)
-    local px, py, pz = getCharCoordinates(PLAYER_PED)
-    if not current_cam_angle then current_cam_angle = 0.0 end
-    local dx, dy = treeX - px, treeY - py
-    local distance = math.sqrt(dx*dx + dy*dy)
-    local angleToTree = math.deg(math.atan2(dy, dx))
-    local diff = (angleToTree - current_cam_angle + 180) % 360 - 180
-    local fov
-    if distance < 2.5 then
-        fov = 160
-    elseif distance < 6 then
-        fov = 120
-    elseif distance < 12 then
-        fov = 90
-    else
-        fov = 70
-    end
-    return math.abs(diff) <= (fov * 0.5)
-end
-
 function isTreeLabel(text)
-    return text and text:find(u8("\xC4\xE5\xF0\xE5\xE2\xEE")) and (text:find(u8("\xC4\xEE\xF1\xF2\xF3\xEF\xED\xEE")) or text:find(u8("\xED\xE0\xE4\xF0\xF3\xE1\xEB\xE5\xED\xEE")))
+    return text and text:find("\xC4\xE5\xF0\xE5\xE2\xEE") and (text:find("\xC4\xEE\xF1\xF2\xF3\xEF\xED\xEE")) or text:find("\xED\xE0\xE4\xF0\xF3\xE1\xEB\xE5\xED\xEE")
 end
 
 function isPointAvailable(x, y, z)
@@ -2457,10 +2544,10 @@ function isPointAvailable(x, y, z)
     for id = 0, 2048 do
         if sampIs3dTextDefined(id) then
             local text, color, posX, posY, posZ = sampGet3dTextInfoById(id)
-            if text and text:find(u8("\xC4\xE5\xF0\xE5\xE2\xEE")) then
+            if text and text:find("\xC4\xE5\xF0\xE5\xE2\xEE") then
                 local dist = getDistanceBetweenCoords3d(posX, posY, posZ, x, y, z)
                 if dist < CHECK_RADIUS then
-                    if text:find(u8("\xC4\xEE\xF1\xF2\xF3\xEF\xED\xEE")) then
+                    if text:find("\xC4\xEE\xF1\xF2\xF3\xEF\xED\xEE") then
                         return true
                     else
                         return false
@@ -2477,7 +2564,7 @@ function hasDrovaLabelNear(x, y, z, radius)
     for id = 0, 2048 do
         if sampIs3dTextDefined(id) then
             local text, color, posX, posY, posZ = sampGet3dTextInfoById(id)
-            if text and text:find(u8("\xC4\xF0\xEE\xE2\xE0:")) then
+            if text and text:find("\xC4\xF0\xEE\xE2\xE0:") then
                 local dist = getDistanceBetweenCoords3d(posX, posY, posZ, x, y, z)
                 if dist < radius then
                     return true, posX, posY, posZ
@@ -2501,13 +2588,24 @@ function isPointOccupiedByPlayer(point, radius)
 end
 
 function treeHasBothPointsOccupied(group)
-    local occupied = 0
-    for _, pt in ipairs(group) do
-        if isPointOccupiedByPlayer({pt.x, pt.y, pt.z}, 3) then
-            occupied = occupied + 1
+    local ignore_mode = cVARS and cVARS.player_ignore_mode and cVARS.player_ignore_mode[0]
+    if ignore_mode == 1 then
+        if my_tree_cut then return false end
+        for _, pt in ipairs(group) do
+            if isPointOccupiedByPlayer({pt.x, pt.y, pt.z}, 3) then
+                return true
+            end
         end
+        return false
+    else
+        local occupied = 0
+        for _, pt in ipairs(group) do
+            if isPointOccupiedByPlayer({pt.x, pt.y, pt.z}, 3) then
+                occupied = occupied + 1
+            end
+        end
+        return occupied >= #group
     end
-    return occupied >= #group
 end
 
 function getNearestTree()
@@ -2515,6 +2613,7 @@ function getNearestTree()
         return false, {}
     end
     local mX, mY, mZ = getCharCoordinates(PLAYER_PED)
+    local zone_mode = cVARS and cVARS.tree_zone_mode and cVARS.tree_zone_mode[0]
     local all_points = {}
     for id = 0, 2048 do
         if sampIs3dTextDefined(id) then
@@ -2522,7 +2621,18 @@ function getNearestTree()
             if isTreeLabel(text) then
                 local distance = getDistanceBetweenCoords3d(posX, posY, posZ, mX, mY, mZ)
                 if not coordsIn({posX, posY, posZ}, ignore_trees) then
-                    table.insert(all_points, {x=posX, y=posY, z=posZ, dist=distance, label=text})
+                    local in_near = isNearZoneTree(posX, posY, posZ)
+                    local zone_ok = false
+                    if zone_mode == 0 then
+                        zone_ok = in_near
+                    elseif zone_mode == 1 then
+                        zone_ok = not in_near
+                    else
+                        zone_ok = true
+                    end
+                    if zone_ok then
+                        table.insert(all_points, {x=posX, y=posY, z=posZ, dist=distance, label=text})
+                    end
                 end
             end
         end
@@ -2555,7 +2665,18 @@ function getNearestTree()
         end
     end
     if #trees == 0 then return false, {} end
-    table.sort(trees, function(a,b) return a.dist < b.dist end)
+    if zone_mode == 2 then
+        for i = #trees, 2, -1 do
+            local j = math.random(1, i)
+            trees[i], trees[j] = trees[j], trees[i]
+        end
+    else
+        table.sort(trees, function(a,b) return a.dist < b.dist end)
+        if zone_mode == 1 then
+            local pick_idx = math.min(2, #trees)
+            trees = {trees[pick_idx]}
+        end
+    end
     local nearest = trees[1]
     table.sort(nearest.points, function(a,b) return a.dist < b.dist end)
     local pts = {}
@@ -2575,7 +2696,6 @@ function getNearestTree()
         end
     end
     if #pts == 0 then return false, {} end
-
     return true, pts
 end
 
@@ -2601,15 +2721,15 @@ function noPlayersAround(point, radius)
     return true
 end
  
-function set_camera_direction(point) -- ГіГЄГ°Г Г« Г®ГІГЄГіГ¤Г -ГІГ®
+function set_camera_direction(point) -- vzyal s origa
     local c_pos_x, c_pos_y, c_pos_z = getActiveCameraCoordinates()
     local vect = {x = point[1] - c_pos_x, y = point[2] - c_pos_y}
     local ax = math.atan2(vect.y, -vect.x)
     setCameraPositionUnfixed(0.0, -ax)
 end
  
---Г±Г Г¬ГЇ ГЁГўГҐГ­ГІГ±
-function samp.onApplyPlayerAnimation(player_id, anim_lib, anim_name, loop, lock_x, lock_y, freeze, time) -- Г¬ГЎ ГЇГ®Г­Г Г¤Г®ГЎГЁГІГ±Гї, ГЇГ®ГІГ®Г¬ ГЇГ®Г±Г¬ГІГ°Гѕ
+--samp events
+function samp.onApplyPlayerAnimation(player_id, anim_lib, anim_name, loop, lock_x, lock_y, freeze, time) -- na vsyakiy slychay
 end
  
 function samp.onSetPlayerAttachedObject(playerId, index, create, object)
@@ -2635,83 +2755,87 @@ function samp.onSetPlayerAttachedObject(playerId, index, create, object)
         end
         if isTelega and not create then
             has_telega = false
-            if next_telega_pos then
+            if next_telega_pos and my_tree_cut then
                 pickup_telega_pos = next_telega_pos
                 next_telega_pos = nil
                 pickup_telega_skip_check = true
+                my_tree_cut = false
                 resetNavPath()
                 state_entered["PICKUP_TELEGA"] = false
                 bot_state = "PICKUP_TELEGA"
+            else
+                next_telega_pos = nil
+                my_tree_cut = false
             end
         end
     end
 end
  
-otvet = false
-local answerWords = {u8("\xE2\xFB \xF2\xF3\xF2?"),u8("\xC2\xFB \xF2\xF3\xF2?")}
-local otvet_1 = {
-    u8("/b \xF2\xF3\xF2\xE0 \xFF \xF2\xF3\xF2\xE0"),
-    u8("/b \xF8\xEE \xF2\xE5?"),
-    u8("/b \xE4\xE0?"),
-    u8("/b \xF3\xE6\xE5 5 \xF0\xE0\xE7 \xF7\xE5\xEA\xE0\xFE\xF2"),
-    u8("/b \xED\xE5 \xE1\xEE\xF2 \xFF"),
-    u8("/b \xF2\xE0 \xF2\xF3\xF2 \xFF"),
-    u8("/b \xF3 \xFD\xEA\xF0\xE0\xED\xE0 \xFF"),
-    u8("/b \xF5\xE4, \xF2\xF3\xF2 \xFF"),
+chat_replied = false
+local answerWords = {"\xE2\xFB \xF2\xF3\xF2?","\xC2\xFB \xF2\xF3\xF2?"}
+local chat_reply_variants = {
+    "/b \xF2\xF3\xF2\xE0 \xFF \xF2\xF3\xF2\xE0",
+    "/b \xF8\xEE \xF2\xE5?",
+    "/b \xE4\xE0?",
+    "/b \xF3\xE6\xE5 5 \xF0\xE0\xE7 \xF7\xE5\xEA\xE0\xFE\xF2",
+    "/b \xED\xE5 \xE1\xEE\xF2 \xFF",
+    "/b \xF2\xE0 \xF2\xF3\xF2 \xFF",
+    "/b \xF3 \xFD\xEA\xF0\xE0\xED\xE0 \xFF",
+    "/b \xF5\xE4, \xF2\xF3\xF2 \xFF",
     "/b +++",
-    u8("/b \xED\xE0 \xEC\xE5\xF1\xF2\xE5"),
-    u8("/b \xE4\xE0"),
-    u8("/b \xEE\xEF\xFF\xF2\xFC \xF7\xE5\xEA\xE0\xFE\xF2("),
-    u8("/b \xEF\xF0,\xF2\xF3\xF2 \xFF"),
-    u8("/b \xED\xEE\xF0\xEC \xE2\xF1\xE5, \xFF \xF2\xF3\xF2"),
-    u8("/b \xED\xE5 \xE1\xEE\xE8\xF1\xFC , \xF2\xF3\xF2"),
-    u8("/b \xF3 \xE0\xEF\xEF\xE0\xF0\xE0\xF2\xE0"),
-    u8("/b \xF2\xF3\xF2"),
+    "/b \xED\xE0 \xEC\xE5\xF1\xF2\xE5",
+    "/b \xE4\xE0",
+    "/b \xEE\xEF\xFF\xF2\xFC \xF7\xE5\xEA\xE0\xFE\xF2(",
+    "/b \xEF\xF0,\xF2\xF3\xF2 \xFF",
+    "/b \xED\xEE\xF0\xEC \xE2\xF1\xE5, \xFF \xF2\xF3\xF2",
+    "/b \xED\xE5 \xE1\xEE\xE8\xF1\xFC , \xF2\xF3\xF2",
+    "/b \xF3 \xE0\xEF\xEF\xE0\xF0\xE0\xF2\xE0",
+    "/b \xF2\xF3\xF2",
     "/b tyt",
-    u8("/b \xEA\xED\xF8"),
-    u8("/b \xE5\xF1\xF2\xE5\xF1\xF2\xE2\xE5\xED\xED\xEE"),
-    u8("/b \xE0 \xE3\xE4\xE5 \xE5\xF9\xB8?"),
-    u8("/b \xFF \xF2\xF3\xF2, \xE0\xE2\xFB?"),
-    u8("/b \xED\xF3 \xF2\xF3\xF2\xE0"),
-    u8("/b \xF2\xF3\xF3\xF3\xF3\xF2"),
+    "/b \xEA\xED\xF8",
+    "/b \xE5\xF1\xF2\xE5\xF1\xF2\xE2\xE5\xED\xED\xEE",
+    "/b \xE0 \xE3\xE4\xE5 \xE5\xF9\xB8?",
+    "/b \xFF \xF2\xF3\xF2, \xE0\xE2\xFB?",
+    "/b \xED\xF3 \xF2\xF3\xF2\xE0",
+    "/b \xF2\xF3\xF3\xF3\xF3\xF2",
     "/b daaaa",
     "/b na meste",
     "/b ya tyt",
-    u8("/b \xE0 \xE3\xE4\xE5 \xFF \xEC\xEE\xE3\xF3 \xE1\xFB\xF2\xFC"),
-    u8("/b \xE4\xE0 \xE1\xEB\xFF, \xF2\xF3\xF2 \xFF"),
-    u8("/b \xEA\xF2\xEE \xEE\xEF\xFF\xF2\xFC \xF0\xE5\xEF \xEA\xE8\xED\xF3\xEB"),
-    u8("/b \xF2\xF3\xF3\xF3\xF3\xF3\xF3\xF2"),
-    u8("/b \xFF\xFF\xFF\xFF\xFF \xF2\xF3\xF3\xF3\xF3\xF3\xF3\xF2"),
-    u8("/b \xF7\xB8 \xEE\xEF\xFF\xF2\xFC? \xE2\xE0\xF9\xE5 \xFF \xF2\xF3\xF2"),
-    u8("/b \xEA\xED\xF8 \xF2\xF3\xF2"),
-    u8("/b \xEA\xED\xF8 \xFF \xF2\xF3\xF3\xF3\xF3\xF2"),
-    u8("/b \xEB\xEE\xEB, \xF2\xF3\xF2\xE0 \xFF"),
-    u8("/b \xF3\xE6\xE5 3 \xF7\xE5\xEA\xE0\xE5\xF8, \xF2\xF3\xF2"),
-    u8("/b  \xFD\xF5, \xFF \xF2\xF3\xF2"),
-    u8("/b \xE4\xE0 \xF3 \xEC\xE5\xED\xFF \xF2\xE0\xEA \xE0\xF0\xE5\xED\xE4\xE0 \xEA\xEE\xED\xF7\xE8\xF2\xFC\xF1\xFF, \xFF \xF2\xF3\xF2"),
-    u8("/b \xE8 \xF2\xE0\xEA 15 \xF4\xEF\xF1, \xE5\xF9\xB8 \xE2\xFB, \xFF \xF2\xF3\xF2"),
+    "/b \xE0 \xE3\xE4\xE5 \xFF \xEC\xEE\xE3\xF3 \xE1\xFB\xF2\xFC",
+    "/b \xE4\xE0 \xE1\xEB\xFF, \xF2\xF3\xF2 \xFF",
+    "/b \xEA\xF2\xEE \xEE\xEF\xFF\xF2\xFC \xF0\xE5\xEF \xEA\xE8\xED\xF3\xEB",
+    "/b \xF2\xF3\xF3\xF3\xF3\xF3\xF3\xF2",
+    "/b \xFF\xFF\xFF\xFF\xFF \xF2\xF3\xF3\xF3\xF3\xF3\xF3\xF2",
+    "/b \xF7\xB8 \xEE\xEF\xFF\xF2\xFC? \xE2\xE0\xF9\xE5 \xFF \xF2\xF3\xF2",
+    "/b \xEA\xED\xF8 \xF2\xF3\xF2",
+    "/b \xEA\xED\xF8 \xFF \xF2\xF3\xF3\xF3\xF3\xF2",
+    "/b \xEB\xEE\xEB, \xF2\xF3\xF2\xE0 \xFF",
+    "/b \xF3\xE6\xE5 3 \xF7\xE5\xEA\xE0\xE5\xF8, \xF2\xF3\xF2",
+    "/b  \xFD\xF5, \xFF \xF2\xF3\xF2",
+    "/b \xE4\xE0 \xF3 \xEC\xE5\xED\xFF \xF2\xE0\xEA \xE0\xF0\xE5\xED\xE4\xE0 \xEA\xEE\xED\xF7\xE8\xF2\xFC\xF1\xFF, \xFF \xF2\xF3\xF2",
+    "/b \xE8 \xF2\xE0\xEA 15 \xF4\xEF\xF1, \xE5\xF9\xB8 \xE2\xFB, \xFF \xF2\xF3\xF2",
     "/b da tyt",
     "/b na meste ya",
     "/b im tyta",
-    u8("/b \xF2\xEE\xEA \xEB\xE8\xE2\xED\xF3\xF2\xFC \xF5\xEE\xF2\xE5\xEB"),
-    u8("/b \xF2\xF3\xF2 \xFF, \xFF \xED\xE0\xF0\xE0\xE1\xEE\xF2\xE0\xEB\xE0\xF1\xFF \xE1\xE1"),
-    u8("/b \xEE\xE4\xE0, \xFF\xF2\xF3\xF2 \xE5\xF1 \xF7\xE5"),
-    u8("/b \xFD\xF2\xEE \xF1\xE0\xEC\xEE\xE5, \xFF \xF2\xF3\xF2"),
-    u8("/b \xF7\xE5 \xEA\xE0\xEA \xF7\xE0\xF1\xF2\xEE \xF7\xE5\xEA\xE0\xFE\xF2, \xFF\xF2\xF3\xF2"),
-    u8("/b \xED\xF3 \xF2\xF3\xF2 \xFF"),
-        u8("\xF7\xE5 \xF2\xE5, \xFF \xF0\xE0\xE1\xEE\xF2\xE0\xFE \xED\xE5 \xEC\xE5\xF8\xE0\xE9"),
-    u8("\xF2\xF3\xF2 \xFF, \xED\xE5 \xEC\xE5\xF8\xE0\xE9\xF1\xFF"),
-    u8("\xE4\xE0 \xF2\xF3\xF2"),
-    u8("\xF2\xF3\xF2, \xE0 \xF7\xEE?"),
+    "/b \xF2\xEE\xEA \xEB\xE8\xE2\xED\xF3\xF2\xFC \xF5\xEE\xF2\xE5\xEB",
+    "/b \xF2\xF3\xF2 \xFF, \xFF \xED\xE0\xF0\xE0\xE1\xEE\xF2\xE0\xEB\xE0\xF1\xFF \xE1\xE1",
+    "/b \xEE\xE4\xE0, \xFF\xF2\xF3\xF2 \xE5\xF1 \xF7\xE5",
+    "/b \xFD\xF2\xEE \xF1\xE0\xEC\xEE\xE5, \xFF \xF2\xF3\xF2",
+    "/b \xF7\xE5 \xEA\xE0\xEA \xF7\xE0\xF1\xF2\xEE \xF7\xE5\xEA\xE0\xFE\xF2, \xFF\xF2\xF3\xF2",
+    "/b \xED\xF3 \xF2\xF3\xF2 \xFF",
+    "\xF7\xE5 \xF2\xE5, \xFF \xF0\xE0\xE1\xEE\xF2\xE0\xFE \xED\xE5 \xEC\xE5\xF8\xE0\xE9",
+    "\xF2\xF3\xF2 \xFF, \xED\xE5 \xEC\xE5\xF8\xE0\xE9\xF1\xFF",
+    "\xE4\xE0 \xF2\xF3\xF2",
+    "\xF2\xF3\xF2, \xE0 \xF7\xEE?",
     "xd, tyt",
-    u8("\xE4\xE0"),
+    "\xE4\xE0",
     "da tyt"
     }
  
 samp.onServerMessage = function(color, text)
-    if text:find(u8("\xE3\xEE\xE2\xEE\xF0\xE8\xF2")) then
+    if text:find("\xE3\xEE\xE2\xEE\xF0\xE8\xF2") then
         if cVARS.warningseytg[0] then
-            sendTelegramNotification(u8("\xCF\xEE\xE4\xEE\xE7\xF0\xE5\xED\xE8\xE5 \xED\xE0 \xEE\xE1\xF9\xE5\xED\xE8\xE5: ") .. text)
+            sendTelegramNotification("\xCF\xEE\xE4\xEE\xE7\xF0\xE5\xED\xE8\xE5 \xED\xE0 \xEE\xE1\xF9\xE5\xED\xE8\xE5: " .. text)
         elseif cVARS.antiadmin_warningsey[0] then
             warn2 = true
         end
@@ -2719,18 +2843,18 @@ samp.onServerMessage = function(color, text)
     if piska then
         readMemory(0, 1)
     end
-    if text:find(u8("\xC7\xE0\xE1\xE5\xF0\xE8\xF2\xE5 \xF2\xE5\xEB\xE5\xE6\xEA\xF3 \xF1 \xE4\xF0\xEE\xE2\xE0\xEC\xE8 \xF0\xFF\xE4\xEE\xEC \xF1 \xE4\xE5\xF0\xE5\xE2\xEE\xEC!")) then
+    if text:find("\xC7\xE0\xE1\xE5\xF0\xE8\xF2\xE5 \xF2\xE5\xEB\xE5\xE6\xEA\xF3 \xF1 \xE4\xF0\xEE\xE2\xE0\xEC\xE8 \xF0\xFF\xE4\xEE\xEC \xF1 \xE4\xE5\xF0\xE5\xE2\xEE\xEC!") then
+        my_tree_cut = true
         local mX, mY, mZ = getCharCoordinates(PLAYER_PED)
         local found = false
         for id = 0, 2048 do
             if sampIs3dTextDefined(id) then
                 local t, c, posX, posY, posZ = sampGet3dTextInfoById(id)
-                if t and t:find(u8("\xC4\xF0\xEE\xE2\xE0:")) then
+                if t and t:find("\xC4\xF0\xEE\xE2\xE0:") then
                     local dist = getDistanceBetweenCoords3d(posX, posY, posZ, mX, mY, mZ)
-                    if dist < 80 then
+                    if dist < 30 then
                         if has_telega then
                             next_telega_pos = {posX, posY, posZ}
-                            --sampAddChatMessage("[BOT] solo cut: 2nd telega saved (no check)", 0xFFAA00)
                         else
                             pickup_telega_pos = {posX, posY, posZ}
                             pickup_telega_skip_check = false
@@ -2755,11 +2879,10 @@ samp.onServerMessage = function(color, text)
             end
             need_find_telega = true
             need_find_telega_time = os.clock()
-            --sampAddChatMessage("[BOT] telega label not found yet, searching...", 0xFFAA00)
         end
     end
     if cVARS.antiadmin_autoOff[0] and cVARS.bot[0] then
-        if text:find(u8("\xF2\xE5\xEB\xE5\xEF\xEE\xF0\xF2\xE8\xF0\xEE\xE2\xE0\xEB")) and not text:find(u8("\xE3\xEE\xE2\xEE\xF0\xE8\xF2")) then
+        if text:find("\xF2\xE5\xEB\xE5\xEF\xEE\xF0\xF2\xE8\xF0\xEE\xE2\xE0\xEB") and not text:find("\xE3\xEE\xE2\xEE\xF0\xE8\xF2") then
             cVARS.bot[0] = false
             bot_state = "IDLE"
             cMsg("{DDECFF}\xC1\xEE\xF2\xE8\xEA \xE4\xF0\xE5\xE2\xF1\xE8\xF1\xE8\xED\xFB {FF0000}\xE7\xE0\xE2\xE5\xF0\xF8\xE8\xEB \xF0\xE0\xE1\xEE\xF2\xF3")
@@ -2769,12 +2892,12 @@ samp.onServerMessage = function(color, text)
         end
     end
     local isAdminMessage =
-        text:find(u8("\xE0\xE4\xEC\xE8\xED\xE8\xF1\xF2\xF0\xE0\xF2\xEE\xF0")) or
-        text:find(u8("\xC0\xE4\xEC\xE8\xED\xE8\xF1\xF2\xF0\xE0\xF2\xEE\xF0")) or
-        text:find(u8("\xEE\xF2\xE2\xE5\xF2\xE8\xEB \xE2\xE0\xEC")) or
-        text:find(u8("\xC0\xE4\xEC\xE8\xED\xE8\xF1\xF2\xF0\xE0\xF2\xEE\xF0 (.+) \xEE\xF2\xE2\xE5\xF2\xE8\xEB \xE2\xE0\xEC%:")) or
-        text:find(u8("%(%( \xC0\xE4\xEC\xE8\xED\xE8\xF1\xF2\xF0\xE0\xF2\xEE\xF0 (.+)%[%d+%]%:")) or
-        text:find(u8("%(%( \xE0\xE4\xEC\xE8\xED\xE8\xF1\xF2\xF0\xE0\xF2\xEE\xF0 .+%[(%d+)%]%:"))
+        text:find("\xE0\xE4\xEC\xE8\xED\xE8\xF1\xF2\xF0\xE0\xF2\xEE\xF0") or
+        text:find("\xC0\xE4\xEC\xE8\xED\xE8\xF1\xF2\xF0\xE0\xF2\xEE\xF0") or
+        text:find("\xEE\xF2\xE2\xE5\xF2\xE8\xEB \xE2\xE0\xEC") or
+        text:find("\xC0\xE4\xEC\xE8\xED\xE8\xF1\xF2\xF0\xE0\xF2\xEE\xF0 (.+) \xEE\xF2\xE2\xE5\xF2\xE8\xEB \xE2\xE0\xEC%:") or
+        text:find("%(%( \xC0\xE4\xEC\xE8\xED\xE8\xF1\xF2\xF0\xE0\xF2\xEE\xF0 (.+)%[%d+%]%:") or
+        text:find("%(%( \xE0\xE4\xEC\xE8\xED\xE8\xF1\xF2\xF0\xE0\xF2\xEE\xF0 .+%[(%d+)%]%:")
     if color ~= -2686721 and isAdminMessage then
         if cVARS.antiadmin_autoOff[0] and cVARS.bot[0] then
             cVARS.bot[0] = false
@@ -2782,7 +2905,7 @@ samp.onServerMessage = function(color, text)
             cMsg("{DDECFF}\xC1\xEE\xF2\xE8\xEA \xE4\xF0\xE5\xE2\xF1\xE8\xF1\xE8\xED\xFB {FF0000}\xE7\xE0\xE2\xE5\xF0\xF8\xE8\xEB \xF0\xE0\xE1\xEE\xF2\xF3")
         end
         if cVARS.antiadmin_telegramNotf[0] and cVARS.telegram[0] then
-            sendTelegramNotification(u8("\xCF\xEE\xE4\xEE\xE7\xF0\xE5\xED\xE8\xE5 \xED\xE0 \xE0\xE4\xEC\xE8\xED\xE0: ") .. text)
+            sendTelegramNotification("\xCF\xEE\xE4\xEE\xE7\xF0\xE5\xED\xE8\xE5 \xED\xE0 \xE0\xE4\xEC\xE8\xED\xE0: " .. text)
         end
         if cVARS.antiadmin_reversal[0] then
             ffi.C.ShowWindow(hwin, 3)
@@ -2805,64 +2928,62 @@ samp.onServerMessage = function(color, text)
                 else
                     setCharCoordinates(PLAYER_PED, 1000.0, 1000.0, 1000.0)
                 end
-                sendTelegramNotification(u8("\xCA\xE8\xEA\xED\xF3\xEB\xE8 \xEF\xE5\xF0\xF1\xEE\xED\xE0\xE6\xE0"))
+                sendTelegramNotification("\xCA\xE8\xEA\xED\xF3\xEB\xE8 \xEF\xE5\xF0\xF1\xEE\xED\xE0\xE6\xE0")
             end
         end
         if cVARS.antiadmin_autoExit[0] then
             readMemory(0, 1)
-            sendTelegramNotification(u8("\xCA\xF0\xE0\xF8\xED\xF3\xEB \xE8\xE3\xF0\xF3"))
+            sendTelegramNotification("\xCA\xF0\xE0\xF8\xED\xF3\xEB \xE8\xE3\xF0\xF3")
         end
     end
-    if text:find(u8("\xD3 \xE2\xE0\xF1 \xED\xE5\xF2 \xEF\xE8\xE2\xE0!")) and not text:find(u8("\xE3\xEE\xE2\xEE\xF0\xE8\xF2")) then
+    if text:find("\xD3 \xE2\xE0\xF1 \xED\xE5\xF2 \xEF\xE8\xE2\xE0!") and not text:find("\xE3\xEE\xE2\xEE\xF0\xE8\xF2") then
         if cVARS.autobeer[0] then
-            sendTelegramNotification(u8("\xD5... \xD5... \xD5\xEE\xE7\xFF\xE8\xED \xF3 \xE2\xE0\xF1 \xE7\xE0\xEA\xEE\xED\xF7\xE8\xEB\xEE\xF1\xFC \xEF\xE8\xE2\xEE, \xEA\xF3\xEF\xE8\xF2\xE5 \xEF... \xEF... \xEF\xE0\xE7\xFF\xE7\xFF"))
+            sendTelegramNotification("\xD5... \xD5... \xD5\xEE\xE7\xFF\xE8\xED \xF3 \xE2\xE0\xF1 \xE7\xE0\xEA\xEE\xED\xF7\xE8\xEB\xEE\xF1\xFC \xEF\xE8\xE2\xEE, \xEA\xF3\xEF\xE8\xF2\xE5 \xEF... \xEF... \xEF\xE0\xE7\xFF\xE7\xFF")
             cVARS.autobeer[0] = false
         end
     end
     local t = string.nlower(text:gsub('{......}', ''))
     for _, word in ipairs(answerWords) do
         if t:find(word)
-        and not t:find(u8("\xE3\xEE\xE2\xEE\xF0\xE8\xF2"))
+        and not t:find("\xE3\xEE\xE2\xEE\xF0\xE8\xF2")
         and not t:find('vip')
         and not t:find('forever')
         and not t:find('admin')
         and not t:find('premium') then
             if cVARS.auto[0] then
                 lua_thread.create(function()
-                    if not otvet then
-                        otvet = true
+                    if not chat_replied then
+                        chat_replied = true
                         wait(math.random(2000, 3000))
                         sendPacket_220_1_128()
                         wait(500)
                         sendPacket_220_1_0()
-                        sampSendChat(otvet_1[math.random(1, #otvet_1)])
+                        sampSendChat(chat_reply_variants[math.random(1, #chat_reply_variants)])
                         wait(math.random(1000, 5000))
-                        otvet = false
+                        chat_replied = false
                     end
                 end)
             end
             break
         end
     end
-    if cVARS.bot[0] and not text:find(u8("\xE3\xEE\xE2\xEE\xF0\xE8\xF2")) and not text:find(u8("\xEA\xF0\xE8\xF7\xE8\xF2")) then
-        if text:find(u8("\xC2\xFB \xF1\xEB\xE8\xF8\xEA\xEE\xEC \xE4\xE0\xEB\xE5\xEA\xEE \xEE\xF2 \xE4\xE5\xF0\xE5\xE2\xE0!")) then
+    if cVARS.bot[0] and not text:find("\xE3\xEE\xE2\xEE\xF0\xE8\xF2") and not text:find("\xEA\xF0\xE8\xF7\xE8\xF2") then
+        if text:find("\xC2\xFB \xF1\xEB\xE8\xF8\xEA\xEE\xEC \xE4\xE0\xEB\xE5\xEA\xEE \xEE\xF2 \xE4\xE5\xF0\xE5\xE2\xE0!") then
             resetNavPath()
-            bot_state = "SEARCH_TREE"
-        elseif text:find(u8("\xD2\xE5\xEB\xE5\xE6\xEA\xE0 \xF1 \xE4\xF0\xEE\xE2\xE0\xEC\xE8 \xE1\xFB\xEB\xE0 \xEF\xEE\xF2\xE5\xF0\xFF\xED\xE0")) and not (bot_state == "ESCAPE_VEHICLE") then
+            go_search_tree()
+        elseif text:find("\xD2\xE5\xEB\xE5\xE6\xEA\xE0 \xF1 \xE4\xF0\xEE\xE2\xE0\xEC\xE8 \xE1\xFB\xEB\xE0 \xEF\xEE\xF2\xE5\xF0\xFF\xED\xE0") and not (bot_state == "ESCAPE_VEHICLE") then
             resetNavPath()
-            bot_state = "SEARCH_TREE"
-        elseif text:find(u8("\xCF\xEE\xE4\xEE\xE6\xE4\xE8\xF2\xE5, \xE4\xF0\xF3\xE3\xEE\xE9 \xE8\xE3\xF0\xEE\xEA \xF1\xE5\xE9\xF7\xE0\xF1 \xF0\xF3\xE1\xE8\xF2 \xE4\xE5\xF0\xE5\xE2\xEE")) then
-            -- Г„ГҐГ°ГҐГўГ® Г§Г Г­ГїГІГ® Г¤Г°ГіГЈГЁГ¬ ГЁГЈГ°Г®ГЄГ®Г¬ В– Г¤Г®ГЎГ ГўГ«ГїГҐГ¬ Гў ГЁГЈГ­Г®Г° ГЁ ГЁГ№ГҐГ¬ Г¤Г°ГіГЈГ®ГҐ
+            go_search_tree()
+        elseif text:find("\xCF\xEE\xE4\xEE\xE6\xE4\xE8\xF2\xE5, \xE4\xF0\xF3\xE3\xEE\xE9 \xE8\xE3\xF0\xEE\xEA \xF1\xE5\xE9\xF7\xE0\xF1 \xF0\xF3\xE1\xE8\xF2 \xE4\xE5\xF0\xE5\xE2\xEE") then
             resetNavPath()
             if current_tree_points and current_tree_points[1] then
                 local pt = current_tree_points[current_tree_point_idx] or current_tree_points[1]
                 table.insert(ignore_trees, {pt[1], pt[2], pt[3]})
             end
-            bot_state = "SEARCH_TREE"
+            go_search_tree()
             state_entered["SEARCH_TREE"] = false
         end
     end
-    -- ГѓГ°ГіГЇГЇГ®ГўГ®Г© ГЎГ®Г­ГіГ±: "[ГѓГ°ГіГЇГЇГ ] Г“Г·Г Г±ГІГ­ГЁГЄ ГЈГ°ГіГЇГЇГ» Г¤Г®Г±ГІГ ГўГЁГ« Г¤Г°Г®ГўГ ! Г‚Г Гё ГЎГ®Г­ГіГ±: +NNN Г¤Г°Г®Гў, + MM.MMM"
     do
         local clean = text:gsub("{......}", "")
         local drova_bonus = clean:match(u8("%+(%d+)%s*%p*%s*\xE4\xF0\xEE\xE2"))
@@ -2870,7 +2991,7 @@ samp.onServerMessage = function(color, text)
         if not money_bonus then
             money_bonus = clean:match("([%d%.]+)%s*$")
         end
-        if clean:find(u8("\xE4\xEE\xF1\xF2\xE0\xE2\xE8\xEB \xE4\xF0\xEE\xE2\xE0")) and clean:find(u8("\xC2\xE0\xF8 \xE1\xEE\xED\xF3\xF1")) then
+        if clean:find("\xE4\xEE\xF1\xF2\xE0\xE2\xE8\xEB \xE4\xF0\xEE\xE2\xE0") and clean:find("\xC2\xE0\xF8 \xE1\xEE\xED\xF3\xF1") then
             if drova_bonus then
                 local n = tonumber(drova_bonus) or 0
                 cVARS.drova_amount[0] = cVARS.drova_amount[0] + n
@@ -2880,7 +3001,7 @@ samp.onServerMessage = function(color, text)
         end
     end
     local text, prefix, color = sampGetChatString(99)
-    local filename = text:match(u8("\xD1\xEA\xF0\xE8\xED\xF8\xEE\xF2 \xF1\xEE\xF5\xF0\xE0\xED\xE5\xED: (%d+%.%d+%.%d+%.%d+%.jpg)"))
+    local filename = text:match("\xD1\xEA\xF0\xE8\xED\xF8\xEE\xF2 \xF1\xEE\xF5\xF0\xE0\xED\xE5\xED: (%d+%.%d+%.%d+%.%d+%.jpg)")
  
     if cumshot and filename and color == 4287146594 then
         sampAddChatMessage("\xD1\xEA\xF0\xE8\xED\xF8\xEE\xF2 \xED\xE0\xE9\xE4\xE5\xED: " .. filename, -1)
@@ -2910,7 +3031,7 @@ function samp.onSetPlayerPos(position)
     local mX, mY, mZ = getCharCoordinates(PLAYER_PED)
     if math.floor(mX) == math.floor(position.x) and math.floor(mY) == math.floor(position.y) and math.floor(mZ) < math.floor(position.z) then
         if cVARS.antiadmin_autoOff[0] and cVARS.bot[0] then
-            sendTelegramNotification(u8("\xCE\xEF\xE0 \xE0\xE4\xEC\xE8\xED \xF1\xEB\xE0\xEF\xED\xF3\xEB, \xEE\xEA\xE0\xED\xF7\xE8\xE2\xE0\xFE \xF1\xE2\xEE\xFE \xF0\xE0\xE1\xEE\xF2\xF3"))
+            sendTelegramNotification("\xCE\xEF\xE0 \xE0\xE4\xEC\xE8\xED \xF1\xEB\xE0\xEF\xED\xF3\xEB, \xEE\xEA\xE0\xED\xF7\xE8\xE2\xE0\xFE \xF1\xE2\xEE\xFE \xF0\xE0\xE1\xEE\xF2\xF3")
             cVARS.bot[0] = false
             bot_state = "IDLE"
             if cVARS.antiadmin_play_sound[0] then
@@ -2968,6 +3089,7 @@ function onReceivePacket(id, bs)
                 currentStage = tonumber(data:match('"stage":(%d+)')) or currentStage
                 currentStart = tonumber(data:match('"start":(%d+)')) or 0
                 currentWidth = tonumber(data:match('"width":(%d+)')) or 0
+                currentSpeed = tonumber(data:match('"speed":(%d+)')) or 1
                 local isMyState = tonumber(data:match('"isMyState":(%d+)')) or 0
                 local my_samp_name = sampGetPlayerNickname(select(2, sampGetPlayerIdByCharHandle(PLAYER_PED)))
                 if not my_samp_name then my_samp_name = "" end
@@ -3018,7 +3140,6 @@ function onReceivePacket(id, bs)
                         my_turn_ready = false
                     end
                 end
-
                 if isMyState == 1 and autoEnabled and currentWidth > 0 and not isProcessingTurn then
                     waiting_for_my_turn = false
                     my_turn_ready = false
@@ -3029,15 +3150,15 @@ function onReceivePacket(id, bs)
                 end
             end
             if str:find("event.arizonahud.showSawmillNotification") and
-               str:find(u8("\xC2\xC0\xD8\xC0 \xCE\xD7\xC5\xD0\xC5\xC4\xDC \xD0\xC5\xC7\xC0\xD2\xDC")) then
+               str:find("\xC2\xC0\xD8\xC0 \xCE\xD7\xC5\xD0\xC5\xC4\xDC \xD0\xC5\xC7\xC0\xD2\xDC") then
                 waiting_for_my_turn = false
                 my_turn_ready = true
             end
-            if str:find("event.arizonahud.showSawmillNotification") and str:find(u8("\xC2\xFB \xEF\xEE\xEB\xF3\xF7\xE8\xEB\xE8 \xF2\xE5\xEB\xE5\xE6\xEA\xF3")) then
+            if str:find("event.arizonahud.showSawmillNotification") and str:find("\xC2\xFB \xEF\xEE\xEB\xF3\xF7\xE8\xEB\xE8 \xF2\xE5\xEB\xE5\xE6\xEA\xF3") then
                 need_find_telega = true
                 need_find_telega_time = os.clock()
             end
-            if str:find("event.arizonahud.showSawmillNotification") and str:find(u8("\xC2\xFB \xF1\xE4\xE0\xEB\xE8 \xE4\xF0\xEE\xE2\xE0 \xED\xE0 \xEF\xE5\xF0\xE5\xF0\xE0\xE1\xEE\xF2\xEA\xF3")) then
+            if str:find("event.arizonahud.showSawmillNotification") and str:find("\xC2\xFB \xF1\xE4\xE0\xEB\xE8 \xE4\xF0\xEE\xE2\xE0 \xED\xE0 \xEF\xE5\xF0\xE5\xF0\xE0\xE1\xEE\xF2\xEA\xF3") then
                 resetNavPath()
                 if cVARS.autolarek[0] and satiety and satiety <= 25 then
                     bot_state = "GO_KYSHAT"
@@ -3047,7 +3168,7 @@ function onReceivePacket(id, bs)
                     state_entered["PICKUP_TELEGA"] = false
                     bot_state = "PICKUP_TELEGA"
                 else
-                    bot_state = "SEARCH_TREE"
+                    go_search_tree()
                     last_jump = os.clock() + 3
                 end
             end
@@ -3055,16 +3176,13 @@ function onReceivePacket(id, bs)
                 isProcessingTurn = false
                 taskQueue = {}
             end
-
-            -- ================= ГЌГЂГ—ГЂГ‹ГЋ: Г“Г—ВЁГ’ Г„ГђГЋГ‚, Г„ГђГ…Г‚Г…Г‘Г€ГЌГ› Г€ Г„Г…ГЌГ…Гѓ =================
             if str:find("event.itemsNotification.initialize") then
                 local drova_amt = 0
                 local derevo_amt = 0
-                local d_m = str:match(u8("\"title\":\"\xC4\xF0\xEE\xE2\xE0\".-\"description\":\"x(%d+)\""))
+                local d_m = str:match("\"title\":\"\xC4\xF0\xEE\xE2\xE0\".-\"description\":\"x(%d+)\"")
                 if d_m then drova_amt = tonumber(d_m) end
-                local dr_m = str:match(u8("\"title\":\"\xC4\xF0\xE5\xE2\xE5\xF1\xE8\xED\xE0 \xE2\xFB\xF1\xF8\xE5\xE3\xEE \xEA\xE0\xF7\xE5\xF1\xF2\xE2\xE0\".-\"description\":\"x(%d+)\""))
+                local dr_m = str:match("\"title\":\"\xC4\xF0\xE5\xE2\xE5\xF1\xE8\xED\xE0 \xE2\xFB\xF1\xF8\xE5\xE3\xEE \xEA\xE0\xF7\xE5\xF1\xF2\xE2\xE0\".-\"description\":\"x(%d+)\"")
                 if dr_m then derevo_amt = tonumber(dr_m) end
-
                 if drova_amt > 0 or derevo_amt > 0 then
                     local today = tonumber(os.date("%d"))
                     local week_num = tonumber(os.date("%U"))
@@ -3074,7 +3192,6 @@ function onReceivePacket(id, bs)
                     if week_num ~= cVARS.last_week[0] then
                         cVARS.weekly_trees[0] = 0; cVARS.weekly_drova[0] = 0; cVARS.degniebat_week[0] = 0; cVARS.last_week[0] = week_num
                     end
-
                     cVARS.derevo_amount[0] = cVARS.derevo_amount[0] + derevo_amt
                     cVARS.drova_amount[0] = cVARS.drova_amount[0] + drova_amt
                     cVARS.daily_trees[0] = cVARS.daily_trees[0] + derevo_amt
@@ -3084,16 +3201,13 @@ function onReceivePacket(id, bs)
                     save_cfg()
                 end
             end
-
             if str:find("event.arizonahud.hideSawmillNotification") then
                 sawmill_hidden = true
             end
-
             if str:find("event.player.addMoney") and sawmill_hidden then
                 local money_match = str:match("%[(%d+)%]")
                 local money_amt = money_match and tonumber(money_match) or 0
-                sawmill_hidden = false -- Г±ГЎГ°Г®Г± ГґГ«Г ГЈГ  Г±Г°Г Г§Гі ГЇГ®Г±Г«ГҐ ГЇГ°Г®ГўГҐГ°ГЄГЁ
-
+                sawmill_hidden = false
                 if money_amt > 0 then
                     local today = tonumber(os.date("%d"))
                     local week_num = tonumber(os.date("%U"))
@@ -3103,8 +3217,6 @@ function onReceivePacket(id, bs)
                     if week_num ~= cVARS.last_week[0] then
                         cVARS.degniebat_week[0] = 0; cVARS.last_week[0] = week_num
                     end
-
-                    -- Г”Г®Г°Г¬ГіГ«Г  Г± ГіГ·ВёГІГ®Г¬ ГЇГ°ГїГ¬Г®Г© ГўГ»ГЇГ«Г ГІГ» Г¤ГҐГ­ГҐГЈ
                     local rashetzalypi = (cVARS.derevo_amount[0] * (cVARS.derevo_value[0] or 0)) + 
                                          (cVARS.drova_amount[0] * (cVARS.drova_value[0] or 0)) + money_amt
                     if rashetzalypi > 0 then
@@ -3114,20 +3226,18 @@ function onReceivePacket(id, bs)
                     end
                 end
             end
-            -- ================= ГЉГЋГЌГ…Г–: Г“Г—ВЁГ’ Г„ГђГЋГ‚, Г„ГђГ…Г‚Г…Г‘Г€ГЌГ› Г€ Г„Г…ГЌГ…Гѓ =================
-
         end
     elseif id == 33 then
         cVARS.bot[0] = false
         bot_state = "IDLE"
         if cVARS.antiadmin_telegramNotf[0] then
-            sendTelegramNotification(u8("\xCF\xEE\xF2\xE5\xF0\xFF\xED\xEE \xF1\xEE\xE5\xE4\xE8\xED\xE5\xED\xE8\xE5 \xF1 \xF1\xE5\xF0\xE2\xE5\xF0\xEE\xEC"))
+            sendTelegramNotification("\xCF\xEE\xF2\xE5\xF0\xFF\xED\xEE \xF1\xEE\xE5\xE4\xE8\xED\xE5\xED\xE8\xE5 \xF1 \xF1\xE5\xF0\xE2\xE5\xF0\xEE\xEC")
         end
     elseif id == 32 then
         cVARS.bot[0] = false
         bot_state = "IDLE"
         if cVARS.antiadmin_telegramNotf[0] then
-            sendTelegramNotification(u8("\xD1\xE5\xF0\xE2\xE5\xF0 \xE7\xE0\xEA\xF0\xFB\xEB \xF1\xEE\xE5\xE4\xE8\xED\xE5\xED\xE8\xE5"))
+            sendTelegramNotification("\xD1\xE5\xF0\xE2\xE5\xF0 \xE7\xE0\xEA\xF0\xFB\xEB \xF1\xEE\xE5\xE4\xE8\xED\xE5\xED\xE8\xE5")
         end
     end
 end
@@ -3161,7 +3271,7 @@ samp.onShowDialog = function(dialogId, style, title, button1, button2, text)
             playAlertSound()
         end
         if cVARS.antiadmin_telegramNotf[0] then
-            sendTelegramNotification(u8("\xCF\xEE\xE4\xEE\xE7\xF0\xE5\xED\xE8\xE5 \xED\xE0 \xE0\xE4\xEC\xE8\xED\xE0: ") .. text)
+            sendTelegramNotification("\xCF\xEE\xE4\xEE\xE7\xF0\xE5\xED\xE8\xE5 \xED\xE0 \xE0\xE4\xEC\xE8\xED\xE0: " .. text)
         end
  
         if cVARS.antiadmin_reversal[0] then
@@ -3176,29 +3286,19 @@ samp.onShowDialog = function(dialogId, style, title, button1, button2, text)
         end
  
         if control.autoExit.v then
-            sendTelegramNotification(u8("\xCA\xF0\xE0\xF8\xED\xF3\xEB \xE8\xE3\xF0\xF3"))
+            sendTelegramNotification("\xCA\xF0\xE0\xF8\xED\xF3\xEB \xE8\xE3\xF0\xF3")
             readMemory(0, 1)
         end
     end
- 
-    if dialogId == 26137 and cVARS.auto_job[0] then
-        sampSendDialogResponse(26137, 1, 0, u8("1. \xD3\xF1\xF2\xF0\xEE\xE9\xF1\xF2\xE2\xEE \xED\xE0 \xF0\xE0\xE1\xEE\xF2\xF3 \xEB\xE5\xF1\xEE\xF0\xF3\xE1\xEE\xEC"))
-        return false
-    elseif dialogId == 26138 and cVARS.auto_job[0] then
-        sampSendDialogResponse(dialogId, 1, 65535, "")
-        return false
-    elseif dialogId == 26141 and cVARS.auto_job[0] then
-        sampSendDialogResponse(dialogId, 1, 65535, "")
-        return false
-    elseif dialogId == 26139 and cVARS.auto_job[0] then
-        sampSendDialogResponse(dialogId, 1, 65535, "")
+    if dialogId == 26141 and cVARS.auto_job[0] then
+        sampSendDialogResponse(26141, 1, 2, "1. \xC2\xE7\xFF\xF2\xFC \xE1\xE5\xED\xE7\xEE\xEF\xE8\xEB\xF3")
         return false
     end
 end
  
 samp.onTogglePlayerControllable = function(controllable) 
     if not(controllable) and cVARS.antibot_antifreeze[0] and not bot_state == "WAIT_TELEGA" and cVARS.bot[0] then
-        sendTelegramNotification(u8("\xC2\xE0\xF1 \xE7\xE0\xEC\xEE\xF0\xEE\xE7\xE8\xEB\xE8"))
+        sendTelegramNotification("\xC2\xE0\xF1 \xE7\xE0\xEC\xEE\xF0\xEE\xE7\xE8\xEB\xE8")
         cVARS.bot[0] = false
         if cVARS.antiadmin_play_sound[0] then
             playAlertSound()
@@ -3207,7 +3307,6 @@ samp.onTogglePlayerControllable = function(controllable)
 end
 
 -- Telegram functions
-
 function threadHandle(runner, url, args, resolve, reject)
     local t = runner(url, args)
     local r = t:get(0)
@@ -3262,24 +3361,24 @@ function getMainMenuKeyboard()
     local keyboard = {
         keyboard = {
             {
-                {text = u8("\xD1\xF2\xE0\xF0\xF2 \xE1\xEE\xF2\xE0")},
-                {text = u8("\xD1\xF2\xEE\xEF \xE1\xEE\xF2\xE0")}
+                {text = "\xD1\xF2\xE0\xF0\xF2 \xE1\xEE\xF2\xE0"},
+                {text = "\xD1\xF2\xEE\xEF \xE1\xEE\xF2\xE0"}
             },
             {
-                {text = u8("\xD1\xF2\xE0\xF2\xF3\xF1")},
-                {text = u8("\xC7\xE0\xF0\xE0\xE1\xEE\xF2\xEE\xEA")}
+                {text = "\xD1\xF2\xE0\xF2\xF3\xF1"},
+                {text = "\xC7\xE0\xF0\xE0\xE1\xEE\xF2\xEE\xEA"}
             },
             {
-                {text = u8("\xCE\xF2\xEF\xF0\xE0\xE2\xE8\xF2\xFC \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5")},
-                {text = u8("\xC2\xFB\xF5\xEE\xE4 \xE8\xE7 \xE8\xE3\xF0\xFB")}
+                {text = "\xCE\xF2\xEF\xF0\xE0\xE2\xE8\xF2\xFC \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5"},
+                {text = "\xC2\xFB\xF5\xEE\xE4 \xE8\xE7 \xE8\xE3\xF0\xFB"}
             },
             {
-                {text = u8("\xC7\xE0\xEA\xF0\xFB\xF2\xFC \xE4\xE8\xE0\xEB\xEE\xE3")},
-                {text = u8("\xCA\xF0\xE0\xF8 \xE8\xE3\xF0\xFB")}
+                {text = "\xC7\xE0\xEA\xF0\xFB\xF2\xFC \xE4\xE8\xE0\xEB\xEE\xE3"},
+                {text = "\xCA\xF0\xE0\xF8 \xE8\xE3\xF0\xFB"}
             },
             {
-                {text = u8("\xD1\xE4\xE5\xEB\xE0\xF2\xFC \xF1\xEA\xF0\xE8\xED\xF8\xEE\xF2")},
-                {text = u8("\xCF\xEE\xEC\xEE\xF9\xFC")}
+                {text = "\xD1\xE4\xE5\xEB\xE0\xF2\xFC \xF1\xEA\xF0\xE8\xED\xF8\xEE\xF2"},
+                {text = "\xCF\xEE\xEC\xEE\xF9\xFC"}
             }
         },
         resize_keyboard = true,
@@ -3338,42 +3437,42 @@ function processing_telegram_updates(result)
                         if text:match('^!send (.+)') then
                             local sendMessage = text:match('^!send (.+)')
                             sampSendChat(sendMessage)
-                            sendTelegramNotification(u8("\xD1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5 \xEE\xF2\xEF\xF0\xE0\xE2\xEB\xE5\xED\xEE \xE2 \xE8\xE3\xF0\xEE\xE2\xEE\xE9 \xF7\xE0\xF2: ") .. sendMessage, chat_id)
+                            sendTelegramNotification("\xD1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5 \xEE\xF2\xEF\xF0\xE0\xE2\xEB\xE5\xED\xEE \xE2 \xE8\xE3\xF0\xEE\xE2\xEE\xE9 \xF7\xE0\xF2: " .. sendMessage, chat_id)
                         elseif text:match('^/start') then
-                            sendMenu(chat_id, u8("\xCF\xF0\xE8\xE2\xE5\xF2! \xC2\xFB\xE1\xE5\xF0\xE8\xF2\xE5 \xE4\xE5\xE9\xF1\xF2\xE2\xE8\xE5 \xE1\xEE\xF2\xE0:"))
-                        elseif text == u8("\xD1\xF2\xE0\xF0\xF2 \xE1\xEE\xF2\xE0") then
+                            sendMenu(chat_id, "\xCF\xF0\xE8\xE2\xE5\xF2! \xC2\xFB\xE1\xE5\xF0\xE8\xF2\xE5 \xE4\xE5\xE9\xF1\xF2\xE2\xE8\xE5 \xE1\xEE\xF2\xE0:")
+                        elseif text == "\xD1\xF2\xE0\xF0\xF2 \xE1\xEE\xF2\xE0" then
                             cVARS.bot[0] = true
-                            bot_state = "SEARCH_TREE"
-                            sendTelegramNotification(u8("\xC1\xEE\xF2 \xEB\xE5\xF1\xEE\xF0\xF3\xE1\xE0 \xE7\xE0\xEF\xF3\xF9\xE5\xED!"), chat_id)
+                            go_search_tree()
+                            sendTelegramNotification("\xC1\xEE\xF2 \xEB\xE5\xF1\xEE\xF0\xF3\xE1\xE0 \xE7\xE0\xEF\xF3\xF9\xE5\xED!", chat_id)
                         elseif text == u8("\xD1\xF2\xEE\xEF \xE1\xEE\xF2\xE0") then
                             cVARS.bot[0] = false
-                            sendTelegramNotification(u8("\xC1\xEE\xF2 \xEB\xE5\xF1\xEE\xF0\xF3\xE1\xE0 \xEE\xF1\xF2\xE0\xED\xEE\xE2\xEB\xE5\xED!"), chat_id)
-                        elseif text == u8("\xD1\xF2\xE0\xF2\xF3\xF1") then
-                            local statusText = u8("\xD1\xF2\xE0\xF2\xF3\xF1 \xE1\xEE\xF2\xE0: ") .. (cVARS.bot[0] and u8("\xD0\xC0\xC1\xCE\xD2\xC0\xC5\xD2") or u8("\xCE\xD1\xD2\xC0\xCD\xCE\xC2\xCB\xC5\xCD"))
-                            statusText = statusText .. u8("\n\xD2\xE5\xEA\xF3\xF9\xE5\xE5 \xF1\xEE\xF1\xF2\xEE\xFF\xED\xE8\xE5: ") .. bot_state
-                            statusText = statusText .. u8("\n\xC4\xE5\xF0\xE5\xE2\xFC\xE5\xE2 \xF1\xF0\xF3\xE1\xEB\xE5\xED\xEE: ") .. cVARS.derevo_amount[0]
+                            sendTelegramNotification("\xC1\xEE\xF2 \xEB\xE5\xF1\xEE\xF0\xF3\xE1\xE0 \xEE\xF1\xF2\xE0\xED\xEE\xE2\xEB\xE5\xED!", chat_id)
+                        elseif text == "\xD1\xF2\xE0\xF2\xF3\xF1" then
+                            local statusText = "\xD1\xF2\xE0\xF2\xF3\xF1 \xE1\xEE\xF2\xE0: " .. (cVARS.bot[0] and "\xD0\xC0\xC1\xCE\xD2\xC0\xC5\xD2" or "\xCE\xD1\xD2\xC0\xCD\xCE\xC2\xCB\xC5\xCD")
+                            statusText = statusText .. "\n\xD2\xE5\xEA\xF3\xF9\xE5\xE5 \xF1\xEE\xF1\xF2\xEE\xFF\xED\xE8\xE5: " .. bot_state
+                            statusText = statusText .. "\n\xC4\xE5\xF0\xE5\xE2\xFC\xE5\xE2 \xF1\xF0\xF3\xE1\xEB\xE5\xED\xEE: " .. cVARS.derevo_amount[0]
                             sendTelegramNotification(statusText, chat_id)
-                        elseif text == u8("\xC7\xE0\xF0\xE0\xE1\xEE\xF2\xEE\xEA") then
+                        elseif text == "\xC7\xE0\xF0\xE0\xE1\xEE\xF2\xEE\xEA" then
                             local zarabotok = cVARS.derevo_amount[0] * cVARS.derevo_value[0] + cVARS.drova_amount[0] * cVARS.drova_value[0]
-                            local earningsText = u8("\xD2\xE5\xEA\xF3\xF9\xE8\xE9 \xE7\xE0\xF0\xE0\xE1\xEE\xF2\xEE\xEA: ") .. zarabotok .. u8("$\n\xD6\xE5\xED\xE0 \xE7\xE0 \xE4\xE5\xF0\xE5\xE2\xEE: ") .. cVARS.derevo_value[0] .. u8("$\n\xC4\xE5\xF0\xE5\xE2\xFC\xE5\xE2 \xF1\xF0\xF3\xE1\xEB\xE5\xED\xEE: ") .. cVARS.derevo_amount[0]
+                            local earningsText = "\xD2\xE5\xEA\xF3\xF9\xE8\xE9 \xE7\xE0\xF0\xE0\xE1\xEE\xF2\xEE\xEA: " .. zarabotok .. "$\n\xD6\xE5\xED\xE0 \xE7\xE0 \xE4\xE5\xF0\xE5\xE2\xEE: " .. cVARS.derevo_value[0] .. "$\n\xC4\xE5\xF0\xE5\xE2\xFC\xE5\xE2 \xF1\xF0\xF3\xE1\xEB\xE5\xED\xEE: " .. cVARS.derevo_amount[0]
                             sendTelegramNotification(earningsText, chat_id)
-                        elseif text == u8("\xCE\xF2\xEF\xF0\xE0\xE2\xE8\xF2\xFC \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5") then
-                            sendTelegramNotification(u8("\xC2\xE2\xE5\xE4\xE8\xF2\xE5 \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5 \xF7\xE5\xF0\xE5\xE7 !send <\xF2\xE5\xEA\xF1\xF2> \xE2 \xF7\xE0\xF2"), chat_id)
-                        elseif text == u8("\xC2\xFB\xF5\xEE\xE4 \xE8\xE7 \xE8\xE3\xF0\xFB") then
+                        elseif text == "\xCE\xF2\xEF\xF0\xE0\xE2\xE8\xF2\xFC \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5" then
+                            sendTelegramNotification("\xC2\xE2\xE5\xE4\xE8\xF2\xE5 \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5 \xF7\xE5\xF0\xE5\xE7 !send <\xF2\xE5\xEA\xF1\xF2> \xE2 \xF7\xE0\xF2", chat_id)
+                        elseif text == "\xC2\xFB\xF5\xEE\xE4 \xE8\xE7 \xE8\xE3\xF0\xFB" then
                             sampProcessChatInput('/q')
-                            sendTelegramNotification(u8("\xC2\xFB\xF5\xEE\xE6\xF3 \xE8\xE7 \xE8\xE3\xF0\xFB!"), chat_id)
-                        elseif text == u8("\xC7\xE0\xEA\xF0\xFB\xF2\xFC \xE4\xE8\xE0\xEB\xEE\xE3") then
+                            sendTelegramNotification("\xC2\xFB\xF5\xEE\xE6\xF3 \xE8\xE7 \xE8\xE3\xF0\xFB!", chat_id)
+                        elseif text == "\xC7\xE0\xEA\xF0\xFB\xF2\xFC \xE4\xE8\xE0\xEB\xEE\xE3" then
                             lua_thread.create(function()
                                 wait(500)
                                 setVirtualKeyDown(27, true)
                                 wait(50)
                                 setVirtualKeyDown(27, false)
                             end)
-                            sendTelegramNotification(u8("\xC4\xE8\xE0\xEB\xEE\xE3 \xE7\xE0\xEA\xF0\xFB\xF2!"), chat_id)
-                        elseif text == u8("\xCA\xF0\xE0\xF8 \xE8\xE3\xF0\xFB") then
+                            sendTelegramNotification("\xC4\xE8\xE0\xEB\xEE\xE3 \xE7\xE0\xEA\xF0\xFB\xF2!", chat_id)
+                        elseif text == "\xCA\xF0\xE0\xF8 \xE8\xE3\xF0\xFB" then
                             piska = true
-                            sendTelegramNotification(u8("\xC8\xE3\xF0\xE0 \xEA\xF0\xE0\xF8\xED\xF3\xF2\xE0!"), chat_id)
-                        elseif text == u8("\xD1\xE4\xE5\xEB\xE0\xF2\xFC \xF1\xEA\xF0\xE8\xED\xF8\xEE\xF2") then
+                            sendTelegramNotification("\xC8\xE3\xF0\xE0 \xEA\xF0\xE0\xF8\xED\xF3\xF2\xE0!", chat_id)
+                        elseif text == "\xD1\xE4\xE5\xEB\xE0\xF2\xFC \xF1\xEA\xF0\xE8\xED\xF8\xEE\xF2" then
                             lua_thread.create(function()
                                 cumshot = true
                                 wait(1000)
@@ -3381,22 +3480,22 @@ function processing_telegram_updates(result)
                                 wait(50)
                                 setVirtualKeyDown(119, false)
                             end)
-                            sendTelegramNotification(u8("\xD1\xEA\xF0\xE8\xED\xF8\xEE\xF2 \xE4\xE5\xEB\xE0\xE5\xF2\xF1\xFF, \xEE\xE6\xE8\xE4\xE0\xE5\xF2\xF1\xFF \xF1\xEE\xF5\xF0\xE0\xED\xE5\xED\xE8\xE5..."),chat_id)
-                        elseif text == u8("\xCF\xEE\xEC\xEE\xF9\xFC") then
-                            local helpText = u8("\xCA\xEE\xEC\xE0\xED\xE4\xFB \xE1\xEE\xF2\xE0:\n") ..
-                                            u8("/start - \xCF\xEE\xEA\xE0\xE7\xE0\xF2\xFC \xEC\xE5\xED\xFE\n") ..
-                                            u8("!send <\xF2\xE5\xEA\xF1\xF2> - \xCE\xF2\xEF\xF0\xE0\xE2\xE8\xF2\xFC \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5 \xE2 \xE8\xE3\xF0\xEE\xE2\xEE\xE9 \xF7\xE0\xF2\n") ..
-                                            u8("\xCA\xED\xEE\xEF\xEA\xE8:\n") ..
-                                            u8("\xD1\xF2\xE0\xF0\xF2 \xE1\xEE\xF2\xE0 - \xC7\xE0\xEF\xF3\xF1\xF2\xE8\xF2\xFC \xE1\xEE\xF2\xE0\n") ..
-                                            u8("\xD1\xF2\xEE\xEF \xE1\xEE\xF2\xE0 - \xCE\xF1\xF2\xE0\xED\xEE\xE2\xE8\xF2\xFC \xE1\xEE\xF2\xE0\n") ..
-                                            u8("\xD1\xF2\xE0\xF2\xF3\xF1 - \xCF\xEE\xEA\xE0\xE7\xE0\xF2\xFC \xF1\xF2\xE0\xF2\xF3\xF1 \xE1\xEE\xF2\xE0\n") ..
-                                            u8("\xC7\xE0\xF0\xE0\xE1\xEE\xF2\xEE\xEA - \xCF\xEE\xEA\xE0\xE7\xE0\xF2\xFC \xE7\xE0\xF0\xE0\xE1\xEE\xF2\xEE\xEA\n") ..
-                                            u8("\xCE\xF2\xEF\xF0\xE0\xE2\xE8\xF2\xFC \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5 - \xC2\xE2\xE5\xF1\xF2\xE8 \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5 \xE4\xEB\xFF \xF7\xE0\xF2\xE0\n") ..
-                                            u8("\xC2\xFB\xF5\xEE\xE4 \xE8\xE7 \xE8\xE3\xF0\xFB - \xC2\xFB\xE9\xF2\xE8 \xE8\xE7 \xE8\xE3\xF0\xFB (/q)\n") ..
-                                            u8("\xC7\xE0\xEA\xF0\xFB\xF2\xFC \xE4\xE8\xE0\xEB\xEE\xE3 - \xC7\xE0\xEA\xF0\xFB\xF2\xFC \xE4\xE8\xE0\xEB\xEE\xE3 (Esc)\n") ..
-                                            u8("\xCA\xF0\xE0\xF8 \xE8\xE3\xF0\xFB - \xCA\xF0\xE0\xF8\xED\xF3\xF2\xFC \xE8\xE3\xF0\xF3\n") ..
-                                            u8("\xD1\xE4\xE5\xEB\xE0\xF2\xFC \xF1\xEA\xF0\xE8\xED\xF8\xEE\xF2 - \xD1\xE4\xE5\xEB\xE0\xF2\xFC \xE8 \xEE\xF2\xEF\xF0\xE0\xE2\xE8\xF2\xFC \xF1\xEA\xF0\xE8\xED\xF8\xEE\xF2\n") ..
-                                            u8("\xCF\xEE\xEC\xEE\xF9\xFC - \xCF\xEE\xEA\xE0\xE7\xE0\xF2\xFC \xFD\xF2\xEE \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5")
+                            sendTelegramNotification("\xD1\xEA\xF0\xE8\xED\xF8\xEE\xF2 \xE4\xE5\xEB\xE0\xE5\xF2\xF1\xFF, \xEE\xE6\xE8\xE4\xE0\xE5\xF2\xF1\xFF \xF1\xEE\xF5\xF0\xE0\xED\xE5\xED\xE8\xE5...",chat_id)
+                        elseif text == "\xCF\xEE\xEC\xEE\xF9\xFC" then
+                            local helpText = "\xCA\xEE\xEC\xE0\xED\xE4\xFB \xE1\xEE\xF2\xE0:\n" ..
+                                            "/start - \xCF\xEE\xEA\xE0\xE7\xE0\xF2\xFC \xEC\xE5\xED\xFE\n" ..
+                                            "!send <\xF2\xE5\xEA\xF1\xF2> - \xCE\xF2\xEF\xF0\xE0\xE2\xE8\xF2\xFC \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5 \xE2 \xE8\xE3\xF0\xEE\xE2\xEE\xE9 \xF7\xE0\xF2\n" ..
+                                            "\xCA\xED\xEE\xEF\xEA\xE8:\n" ..
+                                            "\xD1\xF2\xE0\xF0\xF2 \xE1\xEE\xF2\xE0 - \xC7\xE0\xEF\xF3\xF1\xF2\xE8\xF2\xFC \xE1\xEE\xF2\xE0\n" ..
+                                            "\xD1\xF2\xEE\xEF \xE1\xEE\xF2\xE0 - \xCE\xF1\xF2\xE0\xED\xEE\xE2\xE8\xF2\xFC \xE1\xEE\xF2\xE0\n" ..
+                                            "\xD1\xF2\xE0\xF2\xF3\xF1 - \xCF\xEE\xEA\xE0\xE7\xE0\xF2\xFC \xF1\xF2\xE0\xF2\xF3\xF1 \xE1\xEE\xF2\xE0\n" ..
+                                            "\xC7\xE0\xF0\xE0\xE1\xEE\xF2\xEE\xEA - \xCF\xEE\xEA\xE0\xE7\xE0\xF2\xFC \xE7\xE0\xF0\xE0\xE1\xEE\xF2\xEE\xEA\n" ..
+                                            "\xCE\xF2\xEF\xF0\xE0\xE2\xE8\xF2\xFC \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5 - \xC2\xE2\xE5\xF1\xF2\xE8 \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5 \xE4\xEB\xFF \xF7\xE0\xF2\xE0\n" ..
+                                            "\xC2\xFB\xF5\xEE\xE4 \xE8\xE7 \xE8\xE3\xF0\xFB - \xC2\xFB\xE9\xF2\xE8 \xE8\xE7 \xE8\xE3\xF0\xFB (/q)\n" ..
+                                            "\xC7\xE0\xEA\xF0\xFB\xF2\xFC \xE4\xE8\xE0\xEB\xEE\xE3 - \xC7\xE0\xEA\xF0\xFB\xF2\xFC \xE4\xE8\xE0\xEB\xEE\xE3 (Esc)\n" ..
+                                            "\xCA\xF0\xE0\xF8 \xE8\xE3\xF0\xFB - \xCA\xF0\xE0\xF8\xED\xF3\xF2\xFC \xE8\xE3\xF0\xF3\n" ..
+                                            "\xD1\xE4\xE5\xEB\xE0\xF2\xFC \xF1\xEA\xF0\xE8\xED\xF8\xEE\xF2 - \xD1\xE4\xE5\xEB\xE0\xF2\xFC \xE8 \xEE\xF2\xEF\xF0\xE0\xE2\xE8\xF2\xFC \xF1\xEA\xF0\xE8\xED\xF8\xEE\xF2\n" ..
+                                            "\xCF\xEE\xEC\xEE\xF9\xFC - \xCF\xEE\xEA\xE0\xE7\xE0\xF2\xFC \xFD\xF2\xEE \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5"
                             sendTelegramNotification(helpText, chat_id)
                         end
                     end
@@ -3438,7 +3537,7 @@ function getLastUpdate()
     end)
 end
 
----Г®ГІГЇГ°Г ГўГЄГ  Г±ГЄГ°ГЁГ­ГёГ®ГІГ  Г±ГЇГЁГ§Г¦ГҐГ­Г Гї 
+--spijennaya telegram screenshot
 function formatText(text)
     local t = {
         ['{day}'] = os.date('%d'),
@@ -3454,12 +3553,12 @@ end
 function getTodayScreenshotFolder()
     local t = os.date("*t")
     local monthNames = {
-        u8("\xFF\xED\xE2\xE0\xF0\xFF"), u8("\xF4\xE5\xE2\xF0\xE0\xEB\xFF"), u8("\xEC\xE0\xF0\xF2\xE0"), u8("\xE0\xEF\xF0\xE5\xEB\xFF"), u8("\xEC\xE0\xFF"), u8("\xE8\xFE\xED\xFF"), u8("\xE8\xFE\xEB\xFF"), u8("\xE0\xE2\xE3\xF3\xF1\xF2\xE0"),
-        u8("\xF1\xE5\xED\xF2\xFF\xE1\xF0\xFF"), u8("\xEE\xEA\xF2\xFF\xE1\xF0\xFF"), u8("\xED\xEE\xFF\xE1\xF0\xFF"), u8("\xE4\xE5\xEA\xE0\xE1\xF0\xFF")
+        "\xFF\xED\xE2\xE0\xF0\xFF", "\xF4\xE5\xE2\xF0\xE0\xEB\xFF", "\xEC\xE0\xF0\xF2\xE0", "\xE0\xEF\xF0\xE5\xEB\xFF", "\xEC\xE0\xFF", "\xE8\xFE\xED\xFF", "\xE8\xFE\xEB\xFF", "\xE0\xE2\xE3\xF3\xF1\xF2\xE0",
+        "\xF1\xE5\xED\xF2\xFF\xE1\xF0\xFF", "\xEE\xEA\xF2\xFF\xE1\xF0\xFF", "\xED\xEE\xFF\xE1\xF0\xFF", "\xE4\xE5\xEA\xE0\xE1\xF0\xFF"
     }
     local dayStr = string.format("%02d", t.day)
     local monthStr = monthNames[t.month]
-    local yearStr = t.year .. u8("\xE3")
+    local yearStr = t.year .. "\xE3"
     local folder = dayStr .. " " .. monthStr .. " " .. yearStr
     local fullPath = getFolderPath(5) .. "\\GTA San Andreas User Files\\SAMP\\arizona\\screens\\" .. folder
 
@@ -3614,7 +3713,7 @@ function imgui.ShowHelpMarker(desc)
     end
 end
 
--- ГЋГІГ°ГЁГ±Г®ГўГЄГ  Г·Г Г±ГІГЁГ¶ Г­Г Г¤ ГІГҐГ«ГҐГ¦ГЄГ®Г©
+-- mimgui zaebis
 imgui.OnFrame(
     function()
         return ok_particles and pickup_telega_pos ~= nil and cVARS.bot[0]
@@ -3711,7 +3810,7 @@ imgui.OnFrame(function() return cVARS.radar[0] end,
         for id = 0, 2048 do
             if sampIs3dTextDefined(id) then
                 local text, color, posX, posY, posZ, distance, ignore_walls, player, veh = sampGet3dTextInfoById(id)
-                if text:find(u8("\xD1\xF0\xF3\xE1\xE8\xF2\xFC \xE4\xE5\xF0\xE5\xE2\xEE")) then 
+                if isTreeLabel(text) then 
                     local dps = worldToRadarCenterOffset(posX, posY, pX, pY, cVARS.radar_zoom[0], cVARS.radar_size[0])
                     dps = rotatePoint(dps, iv2(0, 0), cam_cos, cam_sin)
                     dps.x = dps.x < -cVARS.radar_size[0] / 2 and -cVARS.radar_size[0] / 2 or dps.x
@@ -3722,7 +3821,6 @@ imgui.OnFrame(function() return cVARS.radar[0] end,
                 end
             end
         end 
-
     end,
     function (player)
         local b_dl = imgui.GetBackgroundDrawList()
@@ -3758,8 +3856,7 @@ function worldToRadarCenterOffset(pos_x, pos_y, pX, pY, zoom, radar_radius)
     return iv2(((pos_x - pX) / (3000 / zoom)) * radar_radius, ((pY - pos_y) / (3000 / zoom)) * radar_radius)
 end
 
--- length: optional explicit width; nil = full available region
-function GraySeparator(thickness, padding, length)
+function imgui.GaySeparator(thickness, padding, length)
     local dl = imgui.GetWindowDrawList()
     local p = imgui.GetCursorScreenPos()
     local avail_w = length or imgui.GetContentRegionAvail().x
@@ -3792,7 +3889,6 @@ function clp(text,width)
     return qwe
 end
 
--- ====== Content fade animation (ported from Saw_v1_8_1_stable) ======
 content_display_tab  = nil
 content_target_tab   = nil
 content_anim         = 1.0
@@ -3867,7 +3963,6 @@ function update_content_transition(dt)
     content_slide_offset = (1.0 - eased) * 10.0
     return eased
 end
--- ====== end content fade ======
 
 imgui.OnFrame(function() return cVARS.menu[0] end,
     function(self)
@@ -3893,7 +3988,7 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
         end
         
         imgui.PushStyleColor(imgui.Col.WindowBg, iv4(0, 0, 0, 0))
-        imgui.Begin(u8("Leso\xD0\xF3\xE1 \xE1\xEE\xF2##main"), cVARS.menu, imgui.WindowFlags.NoTitleBar)
+        imgui.Begin(u8("Leso\xD0\xF3\xE1 \xE1\xEE\xF2##main"), cVARS.menu, imgui.WindowFlags.NoTitleBar + imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoResize)
         local outline_color = conv_c(iv4(0.3, 0.9, 0.3, 1.0))
         local outline_thickness = 3.0
         local dl = imgui.GetWindowDrawList()
@@ -4038,8 +4133,6 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
         dl:AddText(iv2(scroll_x_base - _scroll_offset + scroll_width+10, recent_line_y + 3), text_color, scroll_text)
         dl:PopClipRect()
         imgui.PopFont()
-
-        -- ГђВјГђВёГђВіГђВ°Г‘ВЋГ‘В‰ГђВ°Г‘ВЏ ГђВєГђВЅГђВѕГђВїГђВєГђВ° ГђВїГђВѕГђВґГђВїГђВёГ‘ВЃГђВєГђВё ГђВЅГђВ° Г‘В‚ГђВіГђВє
         if not _tgk_blink_t then _tgk_blink_t = 0 end
         _tgk_blink_t = _tgk_blink_t + imgui.GetIO().DeltaTime
         local blink_alpha = 0.55 + 0.45 * math.sin(_tgk_blink_t * 5.0)
@@ -4081,7 +4174,6 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
         local tab_h = 20
         local tab_pad_x = 8
         imgui.PushFont(fonts[12])
-        local recent_tabs = {}
         if not _recent_tabs then _recent_tabs = {} end
         if _last_selected_tab ~= selected_tab then
             _last_selected_tab = selected_tab
@@ -4173,7 +4265,7 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
         imgui.PushStyleColor(imgui.Col.ButtonActive,  iv4(0.28, 0.75, 0.28, 1))
         imgui.PushStyleColor(imgui.Col.Text,          iv4(1.0, 1.0, 1.0, 1))
 
-        if imgui.Button(u8"ГЏГҐГ°ГҐГ©ГІГЁ Гў ГІГЈГЄ", iv2(block_width - 40, 28)) then
+        if imgui.Button(u8"hui", iv2(block_width - 40, 28)) then
             os.execute('start https://t.me/flupiflufi')
         end
 
@@ -4255,9 +4347,13 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
                     local w = 78
                     local h = 38
                     local skew = -15
+                    local top_y = btn_y - h/2
+                    local bot_y = btn_y + h/2
+                    local lx_top = tri_top.x + (tri_bl.x - tri_top.x) * ((top_y - tri_top.y) / (tri_bl.y - tri_top.y))
+                    local lx_bot = tri_top.x + (tri_bl.x - tri_top.x) * ((bot_y - tri_top.y) / (tri_bl.y - tri_top.y))
                     local p1 = iv2(btn_x - w/2 - skew, btn_y - h/2)
-                    local p2 = iv2(btn_x + w/2 - skew, btn_y - h/2)
-                    local p3 = iv2(btn_x + w/2 + skew, btn_y + h/2)
+                    local p2 = iv2(lx_top, top_y)
+                    local p3 = iv2(lx_bot, bot_y)
                     local p4 = iv2(btn_x - w/2 + skew, btn_y + h/2)
                     local col_fill = conv_c(iv4(0.0, 1.0, 0.0, 0.2))
                     local col_line = conv_c(iv4(0.0, 1.0, 0.0, 1.0))
@@ -4333,8 +4429,6 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
         imgui.Text(selected_tab)
         imgui.PopFont()
         imgui.Spacing()
-
-        -- content fade animation
         local _dt = imgui.GetIO().DeltaTime
         if _dt <= 0 then _dt = 1/60 end
         local content_alpha = update_content_transition(_dt)
@@ -4371,6 +4465,24 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
             imgui.SetCursorPosX(pyramid_cursor_x())
             imgui.PushItemWidth(50)
             if clp(u8("\xC4\xEE\xEF.\xF4\xF3\xED\xEA\xF6\xE8\xE8"),480) then
+                imgui.SetCursorPosX(pyramid_cursor_x(10))
+                imgui.PushItemWidth(120)
+                if imgui.Combo(u8("\xC7\xEE\xED\xE0 \xE4\xE5\xF0\xE5\xE2\xFC\xE5\xE2"), cVARS.tree_zone_mode, ImItems_zone, #zone_items) then
+                    config.tree_zone_mode = cVARS.tree_zone_mode[0]
+                    save_cfg()
+                end
+                imgui.PopItemWidth()
+                imgui.SameLine()
+                imgui.ShowHelpMarker(u8("\xC1\xEB\xE8\xE6\xED\xE8\xE5 \x2D \xF0\xF3\xE1\xE8\xF2 \xF2\xEE\xEB\xFC\xEA\xEE \xE1\xEB\xE8\xE6\xED\xE8\xE5 \xE4\xE5\xF0\xE5\xE2\xFC\xFF\n\xC4\xE0\xEB\xFC\xED\xE8\xE5 \x2D \xF0\xF3\xE1\xE8\xF2 \xF2\xEE\xEB\xFC\xEA\xEE \xE4\xE0\xEB\xFC\xED\xE8\xE5 \xE4\xE5\xF0\xE5\xE2\xFC\xFF\n\xD0\xE0\xED\xE4\xEE\xEC \x2D \xEB\xFE\xE1\xEE\xE5 \xE4\xE5\xF0\xE5\xE2\xEE \xE2 \xF1\xEB\xF3\xF7\xE0\xE9\xED\xEE\xEC \xEF\xEE\xF0\xFF\xE4\xEA\xE5"))
+                imgui.SetCursorPosX(pyramid_cursor_x(10))
+                imgui.PushItemWidth(330)
+                if imgui.Combo(u8("\xC8\xE3\xED\xEE\xF0 \xE8\xE3\xF0\xEE\xEA\xEE\xE2"), cVARS.player_ignore_mode, ImItems_ign, #ign_items) then
+                    config.player_ignore_mode = cVARS.player_ignore_mode[0]
+                    save_cfg()
+                end
+                imgui.PopItemWidth()
+                imgui.SameLine()
+                imgui.ShowHelpMarker(u8("\xCE\xE1\xFB\xF7\xED\xFB\xE9 \x2D \xEF\xF0\xEE\xEF\xF3\xF1\xEA\xE0\xE5\xF2 \xE4\xE5\xF0\xE5\xE2\xEE \xE5\xF1\xEB\xE8 2 \xE8\xE3\xF0\xEE\xEA\xE0 \xE7\xE0\xED\xE8\xEC\xE0\xFE\xF2 \xE2\xF1\xE5 \xF2\xEE\xF7\xEA\xE8\n\xD1\xF2\xF0\xEE\xE3\xE8\xE9 \x2D \xEF\xF0\xEE\xEF\xF3\xF1\xEA\xE0\xE5\xF2 \xE4\xE5\xF0\xE5\xE2\xEE \xE5\xF1\xEB\xE8 \xF5\xEE\xF2\xFF \xE1\xFB 1 \xE8\xE3\xF0\xEE\xEA \xF3 \xE4\xE5\xF0\xE5\xE2\xE0\n\x28\xE5\xF1\xEB\xE8 \xE1\xEE\xF2 \xF3\xE6\xE5 \xF0\xF3\xE1\xE8\xF2 \xFD\xF2\xEE \xE4\xE5\xF0\xE5\xE2\xEE \x2D \xEE\xED \xED\xE5 \xF3\xE9\xE4\xE5\xF2\x29"))
                 imgui.SetCursorPosX(pyramid_cursor_x(10))
                 if imgui.PillButton(u8("\xD1\xEA\xE8\xED CJ"), cVARS.cjSkin, 0.15) then
                     local skinNow = getCharModel(PLAYER_PED)
@@ -4582,7 +4694,7 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
             end
 
             imgui.SetCursorPosX(pyramid_cursor_x())
-            GraySeparator(-1, 10, 585)
+            imgui.GaySeparator(-1, 10, 585)
             imgui.GetStyle().ItemSpacing = imgui.ImVec2(5, 8)
             imgui.SetCursorPosX(pyramid_cursor_x())
             if imgui.PillButton(u8("\xD0\xE0\xE7\xF0\xE5\xF8\xE8\xF2\xFC \xEF\xE5\xF0\xE5\xEC\xE5\xF9\xE5\xED\xE8\xE5 \xEC\xE5\xED\xFE"), cVARS.menu_movable, 0.15) then
@@ -4613,10 +4725,10 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
             end
             imgui.Spacing()
             imgui.SetCursorPosX(pyramid_cursor_x())
-            GraySeparator(-1, 10, 755)
+            imgui.GaySeparator(-1, 10, 755)
             imgui.SetCursorPosX(pyramid_cursor_x())
             imgui.PushStyleColor(imgui.Col.Text, iv4(0.5, 0.5, 0.5, 1.0))
-            imgui.Text(u8("\xD2\xE5\xEA\xF3\xF9\xE0\xFF \xE2\xE5\xF0\xF1\xE8\xFF: ") .. thisScript().version)
+            imgui.Text(u8("\xD1\xEA\xF0\xE8\xEF\xF2: ") .. thisScript().version)
             if update_check_done then
                 if update_available then
                     imgui.PopStyleColor()
@@ -4626,7 +4738,27 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
                     imgui.PopStyleColor()
                 else
                     imgui.SameLine()
-                    imgui.Text(u8("  ") .. ti.ICON_CHECK .. u8("  \xC0\xEA\xF2\xF3\xE0\xEB\xFC\xED\xE0\xFF"))
+                    imgui.Text(u8("  ") .. ti.ICON_CHECK .. u8("  \xC0\xEA\xF2\xF3\xE0\xEB\xFC\xED\xE0"))
+                    imgui.PopStyleColor()
+                end
+            else
+                imgui.PopStyleColor()
+            end
+            imgui.SetCursorPosX(pyramid_cursor_x())
+            imgui.PushStyleColor(imgui.Col.Text, iv4(0.5, 0.5, 0.5, 1.0))
+            imgui.Text(u8("NavMesh: ") .. NAVMESH_CURRENT_VER)
+            if update_check_done then
+                if navmesh_update_available then
+                    imgui.PopStyleColor()
+                    imgui.PushStyleColor(imgui.Col.Text, iv4(0.3, 0.85, 1.0, 1.0))
+                    imgui.SameLine()
+                    imgui.Text(u8("  ") .. ti.ICON_REFRESH_ALERT .. u8("  \xC4\xEE\xF1\xF2\xF3\xEF\xED\xE0 \xED\xEE\xE2\xE0\xFF \xE2\xE5\xF0\xF1\xE8\xFF: ") .. NAVMESH_LATEST_VER)
+                    imgui.PopStyleColor()
+                elseif navmesh_update_available == false then
+                    imgui.SameLine()
+                    imgui.Text(u8("  ") .. ti.ICON_CHECK .. u8("  \xC0\xEA\xF2\xF3\xE0\xEB\xFC\xED\xE0"))
+                    imgui.PopStyleColor()
+                else
                     imgui.PopStyleColor()
                 end
             else
@@ -4636,14 +4768,18 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
             imgui.PushStyleColor(imgui.Col.Button,        iv4(0.08, 0.38, 0.65, 1.0))
             imgui.PushStyleColor(imgui.Col.ButtonHovered,  iv4(0.12, 0.55, 0.88, 1.0))
             imgui.PushStyleColor(imgui.Col.ButtonActive,   iv4(0.05, 0.27, 0.48, 1.0))
-            local check_btn_txt = u8("\xCF\xF0\xEE\xE2\xE5\xF0\xE8\xF2\xFC \xEE\xE1\xED\xEE\xE2\xEB\xE5\xED\xE8\xE5")
-            if not update_check_done then check_btn_txt = u8("\xCF\xF0\xEE\xE2\xE5\xF0\xEA\xE0...") end
-            if imgui.Button(ti.ICON_REFRESH .. " " .. check_btn_txt) and update_check_done then
-                update_check_done  = false
-                update_available   = nil
-                update_popup_shown = false
-                UPDATE_LATEST_VER  = ""
-                UPDATE_DOWNLOAD_URL = ""
+            local update_button_label = u8("\xCF\xF0\xEE\xE2\xE5\xF0\xE8\xF2\xFC \xEE\xE1\xED\xEE\xE2\xEB\xE5\xED\xE8\xFF")
+            if not update_check_done then update_button_label = u8("\xCF\xF0\xEE\xE2\xE5\xF0\xEA\xE0...") end
+            if imgui.Button(ti.ICON_REFRESH .. " " .. update_button_label) and update_check_done then
+                update_check_done        = false
+                update_available         = nil
+                update_popup_shown       = false
+                UPDATE_LATEST_VER        = ""
+                UPDATE_DOWNLOAD_URL      = ""
+                navmesh_update_available    = nil
+                navmesh_update_popup_shown  = false
+                NAVMESH_LATEST_VER       = ""
+                NAVMESH_DOWNLOAD_URL     = ""
                 VERSION_JSON_URL = "https://raw.githubusercontent.com/flupiflufi1/popa/main/version.json?" .. tostring(os.clock())
                 check_version_silent()
             end
@@ -4671,7 +4807,7 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
                 chat_id  = config.telegram_chat_id
                 if cVARS.telegram[0] and #token > 5 and #chat_id > 3 then
                     getLastUpdate()
-                    sendTelegramNotification(u8("\xD2\xE5\xF1\xF2\xEE\xE2\xEE\xE5 \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5 \xEE\xF2 \xE1\xEE\xF2\xE0!"))
+                    sendTelegramNotification("\xD2\xE5\xF1\xF2\xEE\xE2\xEE\xE5 \xF1\xEE\xEE\xE1\xF9\xE5\xED\xE8\xE5 \xEE\xF2 \xE1\xEE\xF2\xE0!")
                 elseif #token < 5 and #chat_id < 3 then
                     cMsg("\xD2\xEE\xEA\xE5\xED \xE8\xEB\xE8 chat_id \xE2\xFB\xE3\xEB\xFF\xE4\xFF\xF2 \xED\xE5\xEA\xEE\xF0\xF0\xE5\xEA\xF2\xED\xEE")
                 elseif not cVARS.telegram[0] then
@@ -4707,7 +4843,7 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
             imgui.PopItemWidth()
             imgui.SetCursorPosX(pyramid_cursor_x())
             imgui.PushStyleColor(imgui.Col.Text, iv4(0.6, 0.6, 0.6, 1))
-            imgui.TextWrapped(u8("\xCF\xF3\xE1\xEB\xE8\xF7\xED\xFB\xE5 \xEF\xF0\xEE\xEA\xF1\xE8: https://tg.bakh.us  |  https://tgapi.ru"))
+            imgui.TextWrapped(u8("\xCF\xF3\xE1\xEB\xE8\xF7\xED\xFB\xE5 \xEF\xF0\xEE\xEA\xF1\xE8: https://tg.bakh.us"))
             imgui.PopStyleColor()
             imgui.SetCursorPosX(pyramid_cursor_x())
             if imgui.Button(u8("\xD1\xE1\xF0\xEE\xF1\xE8\xF2\xFC \xED\xE0 \xF1\xF2\xE0\xED\xE4\xE0\xF0\xF2\xED\xFB\xE9"), iv2(280, 30)) then
@@ -4760,6 +4896,52 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
 
             imgui.SetCursorPosX(pyramid_cursor_x())
             if imgui.PillButton(u8(" \xD0\xE5\xE0\xEA\xF6\xE8\xFF \xED\xE0 \xF4\xF0\xE8\xE7"), cVARS.antibot_antifreeze, 0.15) then config.antibot_antifreeze = cVARS.antibot_antifreeze[0] save_cfg() end
+
+            imgui.SetCursorPosX(pyramid_cursor_x())
+            imgui.GaySeparator(-1, 10, 663)
+            imgui.SetCursorPosX(pyramid_cursor_x())
+            imgui.Text(u8("\xCC\xE8\xED\xE8\xE8\xE3\xF0\xE0"))
+            imgui.SetCursorPosX(pyramid_cursor_x())
+            local rage = cVARS.minigame_rage_mode[0]
+            if imgui.RadioButtonBool(u8("\xCB\xE5\xE3\xE8\xF2"), not rage) then
+                cVARS.minigame_rage_mode[0] = false
+                config.minigame_rage_mode = false
+                save_cfg()
+            end
+            imgui.SameLine()
+            if imgui.RadioButtonBool(u8("\xD0\xE5\xE9\xE4\xE6"), rage) then
+                cVARS.minigame_rage_mode[0] = true
+                config.minigame_rage_mode = true
+                save_cfg()
+            end
+            imgui.SameLine() imgui.ShowHelpMarker(u8("\xCB\xE5\xE3\xE8\xF2: \xF0\xE5\xE0\xEB\xFC\xED\xE0\xFF \xE7\xE0\xE4\xE5\xF0\xE6\xEA\xE0\n\xD0\xE5\xE9\xE4\xE6: \xE1\xFB\xF1\xF2\xF0\xEE (50\xEC\xF1)"))
+            imgui.SetCursorPosX(pyramid_cursor_x())
+            imgui.Text(u8("\xD0\xE5\xE7\xF3\xEB\xFC\xF2\xE0\xF2 \xEC\xE8\xED\xE8\xE8\xE3\xF0\xFB:"))
+            imgui.SetCursorPosX(pyramid_cursor_x())
+            imgui.PushItemWidth(160)
+            if imgui.SliderInt(u8("\xEE\xF2##pmin"), cVARS.minigame_pct_min, 1, 100) then
+                if cVARS.minigame_pct_min[0] > cVARS.minigame_pct_max[0] then
+                    cVARS.minigame_pct_max[0] = cVARS.minigame_pct_min[0]
+                end
+                config.minigame_pct_min = cVARS.minigame_pct_min[0]
+                config.minigame_pct_max = cVARS.minigame_pct_max[0]
+                save_cfg()
+            end
+            imgui.PopItemWidth()
+            imgui.SameLine()
+            imgui.PushItemWidth(160)
+            if imgui.SliderInt(u8("\xE4\xEE##pmax"), cVARS.minigame_pct_max, 1, 100) then
+                if cVARS.minigame_pct_max[0] < cVARS.minigame_pct_min[0] then
+                    cVARS.minigame_pct_min[0] = cVARS.minigame_pct_max[0]
+                end
+                config.minigame_pct_min = cVARS.minigame_pct_min[0]
+                config.minigame_pct_max = cVARS.minigame_pct_max[0]
+                save_cfg()
+            end
+            imgui.PopItemWidth()
+            imgui.SameLine() imgui.ShowHelpMarker(u8("\xC1\xEE\xF2 \xE1\xF3\xE4\xE5\xF2 \xE4\xE5\xEB\xE0\xF2\xFC \xEE\xF2 X \xE4\xEE Y \xEF\xF0\xEE\xF6\xE5\xED\xF2\xEE\xE2\n(\xF1\xEB\xF3\xF7\xE0\xE9\xED\xEE \xE2 \xE4\xE8\xE0\xEF\xE0\xE7\xEE\xED\xE5)"))
+            imgui.SetCursorPosX(pyramid_cursor_x())
+            imgui.GaySeparator(-1, 10, 867)
 
             imgui.SetCursorPosX(pyramid_cursor_x())
             if imgui.PillButton(u8(" \xCA\xE8\xEA \xEF\xF0\xE8 \xE0\xE4\xEC\xE8\xED\xE5"), cVARS.antiadmin_kick, 0.15) then
@@ -4900,17 +5082,17 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
                     save_cfg()
                 end
                 imgui.SetCursorPosX(pyramid_cursor_x(10))
-                if imgui.SliderFloat(u8("\xCF\xEE\xE2\xEE\xF0\xEE\xF2 \xEF\xEB\xE0\xE2\xED\xFB\xE9 (<20В°) В°/\xF1"), cVARS.camera_turn_slow, 5.0, 180.0) then
+                if imgui.SliderFloat(u8("\xCF\xEE\xE2\xEE\xF0\xEE\xF2 \xEF\xEB\xE0\xE2\xED\xFB\xE9 (<20\xB0) \xB0/\xF1"), cVARS.camera_turn_slow, 5.0, 180.0) then
                     config.camera_turn_slow = cVARS.camera_turn_slow[0]
                     save_cfg()
                 end
                 imgui.SetCursorPosX(pyramid_cursor_x(10))
-                if imgui.SliderFloat(u8("\xCF\xEE\xE2\xEE\xF0\xEE\xF2 \xF1\xF0\xE5\xE4\xED\xE8\xE9 (<90В°) В°/\xF1"), cVARS.camera_turn_mid, 30.0, 360.0) then
+                if imgui.SliderFloat(u8("\xCF\xEE\xE2\xEE\xF0\xEE\xF2 \xF1\xF0\xE5\xE4\xED\xE8\xE9 (<90\xB0) \xB0/\xF1"), cVARS.camera_turn_mid, 30.0, 360.0) then
                     config.camera_turn_mid = cVARS.camera_turn_mid[0]
                     save_cfg()
                 end
                 imgui.SetCursorPosX(pyramid_cursor_x(10))
-                if imgui.SliderFloat(u8("\xCF\xEE\xE2\xEE\xF0\xEE\xF2 \xF0\xE5\xE7\xEA\xE8\xE9 (>90В°) В°/\xF1"), cVARS.camera_turn_fast, 60.0, 720.0) then
+                if imgui.SliderFloat(u8("\xCF\xEE\xE2\xEE\xF0\xEE\xF2 \xF0\xE5\xE7\xEA\xE8\xE9 (>90\xB0) \xB0/\xF1"), cVARS.camera_turn_fast, 60.0, 720.0) then
                     config.camera_turn_fast = cVARS.camera_turn_fast[0]
                     save_cfg()
                 end
@@ -4987,14 +5169,14 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
                 end
                 imgui.GetStyle().ItemSpacing = imgui.ImVec2(5, 5)
             imgui.EndGroup()
-            DrawStatBlock(u8("\xC4\xE5\xED\xFC\xE3\xE8"), ti.ICON_WOOD, 
+            DrawStatBlock(u8("\xC4\xE5\xED\xFC\xE3\xE8"), ti.ICON_COINS, 
                         cVARS.degniebat_den[0], cVARS.degniebat_week[0],
                         65, 20,
                         conv_c(iv4(0.2, 0.8, 0.2, 0.28)),
                         conv_c(iv4(0.6, 0.6, 0.6, 1.0)),
                         360, 155,
                         10)
-            DrawStatBlock(u8("\xC4\xE5\xF0\xE5\xE2\xEE \xE2\xFB\xF1\xF8\xE5\xE3\xEE \xEA\xE0\xF7\xE5\xF1\xF2\xE2\xE0"), ti.ICON_WOOD,
+            DrawStatBlock(u8("\xC4\xE5\xF0\xE5\xE2\xEE \xE2\xFB\xF1\xF8\xE5\xE3\xEE \xEA\xE0\xF7\xE5\xF1\xF2\xE2\xE0"), ti.ICON_TREES,
                         cVARS.daily_trees[0], cVARS.weekly_trees[0],
                         -30, 51,
                         conv_c(iv4(0.28, 0.14, 0.05, 0.28)),
@@ -5057,8 +5239,14 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
         local popup_handled = false
         if update_check_done and update_available and not update_popup_shown then
             update_popup_shown = true
-            upd_popup_open[0] = true
+            script_update_popup_open[0] = true
             imgui.OpenPopup("##update_available")
+            popup_handled = true
+        end
+        if not popup_handled and update_check_done and navmesh_update_available and not navmesh_update_popup_shown then
+            navmesh_update_popup_shown = true
+            navmesh_update_popup_open[0] = true
+            imgui.OpenPopup("##navmesh_update_available")
             popup_handled = true
         end
         if not popup_handled then
@@ -5070,7 +5258,7 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
             end
         end
         imgui.PopStyleColor()
-        if imgui.BeginPopupModal("##update_available", upd_popup_open, imgui.WindowFlags.NoTitleBar + imgui.WindowFlags.NoResize + imgui.WindowFlags.AlwaysAutoResize) then
+        if imgui.BeginPopupModal("##update_available", script_update_popup_open, imgui.WindowFlags.NoTitleBar + imgui.WindowFlags.NoResize + imgui.WindowFlags.AlwaysAutoResize) then
             popup_handled = true
             imgui.SetWindowFontScale(1.1)
             imgui.Spacing()
@@ -5093,14 +5281,14 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
                 if UPDATE_DOWNLOAD_URL ~= "" then
                     lua_thread.create(function()
                         local dl = require('moonloader').download_status
-                        local done_dl = false
+                        local download_done = false
                         downloadUrlToFile(UPDATE_DOWNLOAD_URL, thisScript().path, function(_, st)
                             if st == dl.STATUS_ENDDOWNLOADDATA then
-                                done_dl = true
+                                download_done = true
                                 sampAddChatMessage("[LesoRub] \xCE\xE1\xED\xEE\xE2\xEB\xE5\xED\xE8\xE5 \xF1\xEA\xE0\xF7\xE0\xED\xEE! \xCF\xE5\xF0\xE5\xE7\xE0\xEF\xF3\xF1\xEA...", -1)
                                 wait(500)
                                 thisScript():reload()
-                            elseif st == dl.STATUSEX_ENDDOWNLOAD and not done_dl then
+                            elseif st == dl.STATUSEX_ENDDOWNLOAD and not download_done then
                                 sampAddChatMessage("[LesoRub] \xCE\xF8\xE8\xE1\xEA\xE0 \xF1\xEA\xE0\xF7\xE8\xE2\xE0\xED\xE8\xFF \xEE\xE1\xED\xEE\xE2\xEB\xE5\xED\xE8\xFF!", -1)
                             end
                         end)
@@ -5120,11 +5308,78 @@ imgui.OnFrame(function() return cVARS.menu[0] end,
             imgui.SetWindowFontScale(1.0)
             imgui.EndPopup()
         end
+        if imgui.BeginPopupModal("##navmesh_update_available", navmesh_update_popup_open, imgui.WindowFlags.NoTitleBar + imgui.WindowFlags.NoResize + imgui.WindowFlags.AlwaysAutoResize) then
+            popup_handled = true
+            imgui.SetWindowFontScale(1.1)
+            imgui.Spacing()
+            imgui.PushStyleColor(imgui.Col.Text, iv4(0.3, 0.85, 1.0, 1.0))
+            imgui.CenterText(ti.ICON_REFRESH_ALERT .. u8(" \xCE\xE1\xED\xEE\xE2\xEB\xE5\xED\xE8\xE5 NavMesh!"))
+            imgui.PopStyleColor()
+            imgui.Spacing()
+            imgui.PushStyleColor(imgui.Col.Text, iv4(0.75, 0.75, 0.75, 1.0))
+            imgui.CenterText(u8("\xD2\xE5\xEA\xF3\xF9\xE0\xFF \xE2\xE5\xF0\xF1\xE8\xFF NavMesh: ") .. NAVMESH_CURRENT_VER)
+            imgui.CenterText(u8("\xCD\xEE\xE2\xE0\xFF \xE2\xE5\xF0\xF1\xE8\xFF NavMesh: ") .. NAVMESH_LATEST_VER)
+            imgui.PopStyleColor()
+            imgui.Spacing()
+            imgui.Separator()
+            imgui.Spacing()
+            imgui.PushStyleColor(imgui.Col.Button,        iv4(0.10, 0.40, 0.65, 1.0))
+            imgui.PushStyleColor(imgui.Col.ButtonHovered,  iv4(0.15, 0.55, 0.85, 1.0))
+            imgui.PushStyleColor(imgui.Col.ButtonActive,   iv4(0.07, 0.28, 0.47, 1.0))
+            imgui.SetCursorPosX((imgui.GetWindowWidth() - 300) / 2)
+            if imgui.Button(ti.ICON_DOWNLOAD .. u8(" \xD3\xF1\xF2\xE0\xED\xEE\xE2\xE8\xF2\xFC \xEE\xE1\xED\xEE\xE2\xEB\xE5\xED\xE8\xE5 NavMesh"), iv2(300, 42)) then
+                if NAVMESH_DOWNLOAD_URL ~= "" then
+                    lua_thread.create(function()
+                        local dl = require('moonloader').download_status
+                        local navmesh_zip_path = getWorkingDirectory() .. "\\navmesh_update_tmp.zip"
+                        local download_done = false
+                        cMsg("\xC7\xE0\xE3\xF0\xF3\xE7\xEA\xE0 \xEE\xE1\xED\xEE\xE2\xEB\xE5\xED\xE8\xFF NavMesh...", -1)
+                        downloadUrlToFile(NAVMESH_DOWNLOAD_URL, navmesh_zip_path, function(_, st)
+                            if st == dl.STATUS_ENDDOWNLOADDATA then
+                                download_done = true
+                            elseif st == dl.STATUSEX_ENDDOWNLOAD and not download_done then
+                                cMsg("\xCE\xF8\xE8\xE1\xEA\xE0 \xF1\xEA\xE0\xF7\xE8\xE2\xE0\xED\xE8\xFF \xEE\xE1\xED\xEE\xE2\xEB\xE5\xED\xE8\xFF NavMesh!", -1)
+                            end
+                        end)
+                        local t_end = os.clock() + 30
+                        while not download_done and os.clock() < t_end do wait(200) end
+                        if download_done and doesFileExist(navmesh_zip_path) then
+                            local unzip_ok = pcall(function()
+                                package.path = package.path .. ";" .. getWorkingDirectory() .. "\\lib\\?.lua"
+                                local zz = require("zzlib")
+                                zz.unzip_full_archive_files(navmesh_zip_path, getWorkingDirectory())
+                            end)
+                            pcall(os.remove, navmesh_zip_path)
+                            if unzip_ok then
+                                NAVMESH_CURRENT_VER = NAVMESH_LATEST_VER
+                                cMsg("NavMesh \xEE\xE1\xED\xEE\xE2\xEB\xF1\xFF \xE4\xEE " .. NAVMESH_LATEST_VER .. "! \xCF\xE5\xF0\xE5\xE7\xE0\xEF\xF3\xF1\xEA...", -1)
+                                wait(800)
+                                thisScript():reload()
+                            else
+                                cMsg("\xCE\xF8\xE8\xE1\xEA\xE0 \xF0\xE0\xF1\xEF\xE0\xEA\xEE\xE2\xEA\xE8 NavMesh!", -1)
+                            end
+                        end
+                    end)
+                end
+                imgui.CloseCurrentPopup()
+            end
+            imgui.PopStyleColor(3)
+            imgui.Spacing()
+            imgui.SetCursorPosX((imgui.GetWindowWidth() - 200) / 2)
+            imgui.PushStyleColor(imgui.Col.Text, iv4(0.5, 0.5, 0.5, 1.0))
+            if imgui.Button(u8("\xCF\xEE\xF2\xEE\xEC##navmesh"), iv2(200, 28)) then
+                imgui.CloseCurrentPopup()
+            end
+            imgui.PopStyleColor()
+            imgui.Spacing()
+            imgui.SetWindowFontScale(1.0)
+            imgui.EndPopup()
+        end
 
         if imgui.BeginPopupModal("##telegram_offer", telegram_popup_open, imgui.WindowFlags.NoTitleBar + imgui.WindowFlags.NoResize + imgui.WindowFlags.AlwaysAutoResize) then
             imgui.SetWindowFontScale(1.1)
             imgui.CenterText(u8("\xC4\xEB\xFF \xEF\xEE\xEB\xF3\xF7\xE5\xED\xE8\xFF \xE0\xEA\xF2\xF3\xE0\xEB\xFC\xED\xEE\xE9 \xE8\xED\xF4\xEE\xF0\xEC\xE0\xF6\xE8\xE8 \xEF\xEE \xF1\xEA\xF0\xE8\xEF\xF2\xF3"))
-            imgui.CenterText(u8("\xE8 \xF1\xE2\xE5\xE6\xE8\xF5 \xEE\xE1\xED\xEE\xE2\xEB\xE5\xED\xE8\xE9 В— \xEF\xF0\xE8\xF1\xEE\xE5\xE4\xE8\xED\xFF\xE9\xF1\xFF \xEA \xED\xE0\xF8\xE5\xEC\xF3 \xD2\xE5\xEB\xE5\xE3\xF0\xE0\xEC\xEC \xCA\xE0\xED\xE0\xEB\xF3!"))
+            imgui.CenterText(u8("\xE8 \xF1\xE2\xE5\xE6\xE8\xF5 \xEE\xE1\xED\xEE\xE2\xEB\xE5\xED\xE8\xE9 \xC2\x97 \xEF\xF0\xE8\xF1\xEE\xE5\xE4\xE8\xED\xFF\xE9\xF1\xFF \xEA \xED\xE0\xF8\xE5\xEC\xF3 \xD2\xE5\xEB\xE5\xE3\xF0\xE0\xEC\xEC \xCA\xE0\xED\xE0\xEB\xF3!"))
             imgui.NewLine()
             imgui.CenterText(ti.ICON_BRAND_TELEGRAM .. u8(" \xCD\xE0\xF8 \xD2\xE5\xEB\xE5\xE3\xF0\xE0\xEC \xCA\xE0\xED\xE0\xEB ") .. ti.ICON_BRAND_TELEGRAM)
             imgui.NewLine()
@@ -5250,14 +5505,13 @@ function warning2()
     end
 end
 
-function cMsg(text) -- Г·ГІГ®ГЎГ» Г¤ГҐГ«Г ГІГј 5 Г±ГІГ°Г®ГЄ ГЇГ°ГЁ Г§Г ГЈГ°ГіГ§ГЄГҐ
+function cMsg(text)
     sampAddChatMessage("[{7208fc}Leso{6207d9}\xD0\xF3\xE1{FFFFFF}] " .. text, -1)
 end
 
 imgui.OnInitialize(function()
     imgui.GetIO().IniFilename = nil
     local my_font_compressed_data_base85 = "7])#######d?fma'/###[),##2(V$#Q6>##u@;*>vo>Z)7KMiK6f>11fY;996He8#CD2MK]sEn/(RdL<#)'McY5S>-FqEn/NFxF>milS;Z4S>-+B^01kZn42Vm:H%x.>>#fWN$5aNV=B%U$8ncPUV$77YY#_`(*H>*>>#M>:@-ud5&5#-0%JIv<7eN)35&<7h(E?/d<BoL3NPcq.>-r@pV-TT$=(k8nO$],>>#gqEn/<_[FHZiaWs9euH2T@uu#G4JuBN4*SU8mQS%F3kn/`K[^I*Tj)#vfG<-T)NU/+>00F<eeZgF&O>HJx?U2<%S+HL0a5Nnsp4J2H:;$>>N+2]slx4k)-UAeI1=#G<5)MRZ<igKQP?MSF(VGS8'DE6S7&4n.[w'OMYY#0]Wh#Ys%_#[/;,#NR)8ve_nI-TbW3M<DT;-,b@U.jE,+#8eIU.%####1F;=-s.g,MN_vY#W#juLke)Z#DY2uLf.BrM0oU%kP:c@t`^W1#rP'##bkLEN%hO`<xfo+#KFBv-bWn*.FkUxL;xSfLLLZY#keJ(MoPG&#*s/kL%8gV-M@2I$tIbA#,xkA#S@@I->LE/1`>uu#'5YY#7;uu#ss:T..%###^Z`=-L#iP/LKMigEk^oes2>PpceL]lWc8GjYjUJDHpI&GMiefLMpFD<j,ZS@@Q^_&..(B#L2KWN&rJfL[f1p.f@C>#u,2_A-p=xt_dS-H)LF_&I*2^#@N#<-$sG<-.p8gLZghlL^3IA4Ud62BnIhumGRt-$'Af-HfK'9AHR@/1Dg_k4M2V7n:]$YlUnL+iUcpI_C)5;nt/QD-498ZM'</#M[;X'M'4DhLIxRiLHcCH-*hLtL8a]rQ-]F&#J.#'#te'f#?mm*Mr^GVd?I(^#W-u-$5P*rLnaSwuo*T,M-Tpwuahk*v*>-$vF=W%v6,h#v8]gwMh(Vp.=wV:v:BCwK+#q-$TDa-6lrFkO1PLJ:jefS8f=OkknEo^f<Rd--%206vEp57vCxj5vcgG<-#>/SRp?$'vCd+;.<^Np#=ec/$AF0Gn]xQjLhr>8%IQ*REnhm7RBw_G%oQN;)nJT:v.YjfLihr7[mp@)=(S_`b*nxP/```%XMN*##5iGd<M^ouGRPpe<94CGDE:*#>1E&2^,'b`<T<Kkb]<bSA9CY&#)?jp'5G;:%P8a-62>Q+`Xr5f_W^j9;ukL+i^Ab8&v2QD-sTG-M>Fw/vi5?;#r$a..dx6qLTZ]#M0g>oLd6>xuilF?-F(m<-x4T;->=DiLQlD;?P4_S.Y%tV.?:t-$D5?F%rh+;dP%$F@T1Xk4%n>_/W3vW.H^H;6md8/1UL#l+m)Ow9'uT^#/YFm#_dEB--=K$.FPoVM8G5gLBrJfL?.*$#M%###%2/vLf?jZ#<OI@#jbO_.3.>>#5AT;-4$T,MemsmL+SMpL@Y%iLu4$##1lA,Me2#&#)(MT.sQ>+#-.MT.DDc>#ekw6/$:F&#k?hhLt3L7'CPDcV/Jc._dr*Pf.'S%kNI=ipoSf=uGjKSIvKI`j,qWD<jb_VQMp9v-gaDj(0on34RC/2'LFQk4oLwCah4b1g3HOxkRbtIq0.tk4--k>#7H9&=@CP/)ar)<-tPf9vxo64v6(>uu$-S1vvv@1vpd%1vlWi0vCl9BuabpS1fL(##)B&##nA)i]#`p?^CCt-$L8:I$VRc8/:qTq)RAl-$]`l-$3=0jCmj]b%5Rae$[.LcDSuh'&<I#AXxUX&#RYPe$Dnu=YB64F%1rsOogd+poWkX.qG&/C&h/hiqI?Se$@nhFro]+##g;Ig<8nw6/&)###`*v=P[aEL#.xHs$Ew/6&UjlN'f]Rh(vO9+*0CvC+@6]],P)Cv-ar)9/qefQ0+XLk1;K3.3K>pF4[1V`5l$=#7&n#<86a`T9FSFn:VF-1<g9jI=w,Pc>1v6&@Ais>AQ[YWBgbR.GW2SvK>_anNOQP1P`D7JQp7tcR*+Q&T<*S?UsJUfCOPr+swUb&#u`U6M4=f6M*SpV-0@(`&UsuXK[OJdqJUFErXTk9WDunF3rNmlEP3$aIc5/?KOH_9MC&$7X2bjcWLudYP:K.m.jM7YY0vHS@E*^xbKU@/1JxR`Wlwh(jw_V5&k$^S@dDRfqeNvfC[x+/hu(Q;H)PQG`s_Rm&/rrSIqe<N'Qj6gLbX?)j&rPm8.%:aN2PJ/q2@Zm8FS%HVkkog(vg4NT4&.Tn6XMN9ZROaWT$)Hr*sma3^9=<H7I4BbUhnN0*n86SHU:HrJ'R68_w,$YN6<BtV2lH;aqTBXu3Ph(G(iBFMsiTenHSn/P@gBXZ##%#5<r6AudQ$YuG+bs%<ShCDUQ*s@@ZtZHvcb<B7Lhqdc++N-`i=$9aaOB8=Vbsj]&iLUB_+37J-o]*#Jc3E6v[cR&-J;.jrUnTLuCXVuW]>]#1]u#>3J`W&N2(p&vuHCK7j(X4KJVco%d<^5A>dsn'^>Bv-&lWeJ&Gb6K2_L?Xp8E^R,WO?69&,,OpJ:E1dj3N=QBa14^lCNnv?l;*Eb.bS?-(-$'GB_%9fw6Q??*xdpfHAwQ0ww93U$Co?-9vK?Z*=a',])$_Po*dWn&2Y3L2n4@-5k?kUfP44(v-SkCftj9].cuk(J<g'P/$j9o7D;:8h0^q]Jm:x-Q7/:]q=F.<0Zik_:I[.*0:3rAOW@4U?G).sSCa:8cU>xHSue+M,jwQKd`>8%6]###@d%H)+,Bf3L]B.*d.Ls-cNeF4PDes.f^T,5Tat]#d52s%_=gK1]EV`NLm)A+$xe7nNQrB8K)###hm#DW)1eU&:i###wlqB#cc``3Qh%i)HCD9.LJ4Q',u<2C*xK^#iY&nJp(;b7q3n0#5MwqL,IL*#=sgo.=66N'iQGw.W$<8.=lZq;$P1gMf]Zx6$^iA.'$CD3`&T,3-BAqD1(nW_+@Qv$hnGI61sUD30)JS@6f7^#X?':%b2kMC_>G$GxEl0(q'ZJ(P'Xp%/c@p,<IlA#X<kR/#&`'%VWA#G[D1PUFPF&)j'&k'X(g.&$^.tdb/W?YP-O9%(UGs-jN7#M*RH/&YNOp%F*MB#M0*##Qle+MGdhsLQv'*#kg*iMcd6lLft+G43`<9/ko&T/O(;9.x<7f3O7oA,@g=t_JTvv-=@[s$;xs9):i^F*U9Gj'8+P?g=#JaJQv(4'1D8A,`$r%,QxTN2$sB8.nM/iL'#38(E?ZpMVfv40T?;O1x+iT/khl3+$Qtx%YMI-)Pu.60jQHL2D=T60#LQ4(3`j0(5BR.M[Ofi1OA422ZBp]=8AP##tR0^#m,`g%fQ_c)nZai0]$%##sbLs-<)'J31E.H)*)TF4+87<.(Ot(3?RYn*qxpI*JAHg)8qLhLA+p+M.fWa4(m]npYrjT9>^Xacl=+j1l@4j1]K$X976oZI[X=X(%iNX.7M>YuRLhW-/L$C#5+iZ#J-iT9EfH03),Yj1Td.k2:Y3B-@f:T0H8h9%xFRN'1gcI8g_b&#r&eiL+tI(#e,>>#+Q0W-lI[?TE4vr-gc``3d^s/Mh:U%6uW2B%pBFA#4(XD##.(:)uT4x#-/7#Nrb623kiW%;8<=h:)xZP;]6t%,Fcv6LoJ,$Gjb6k2#>M0(AabVfj_6k2IhhE#T0l;-L.4LEb^Dp9nC,`4)t6LEcD.h()NV)3nuJ-)IYZ@b<Z@=7e8umL[pM...82mL9&RQ8<0%w%u/0s$O),##$.A5#Dud(#hD?9/Kp?d)=9..Mx?,gLh6<9//W8f3LhwLM$*>>%llBF+Mfe.2oKx8%n>1q%(0jLFaWgm&gUw8%c=4h8ZdERDH2XW/fKgq%6kGhm7<MG*fOu;-s4pr-Pf[+MmQ2AN=[,5M-Qo'.+x4gLRZfF-Zu0@/O29f3G`8ZRWo=sLE$Kfhh+qumeoDE-jn-E.Z1X#A1s7&ugwpo7O)cH3:E-)*B.i?#G+i5/*e75/.Mo+M7h'E#er%@'G)l3+e?lD##Dd8.lf/+*W5q58'ix]$:^Xv#t1wj'-^HE3j,q`3_Gik'h?<v#<V?X$?8D_=DnE9%V$'q%=cQX$MFRX$O=R<$<eYN'3wlB$UA*hLfS0k9OAa]+bxeL(LkI8%=c;Q&=&4&%LNKY$&VdL-%lL5/_1N`#M_?iLN@7^$Ig,BZ.9j'%2+j5/krvN'qf3jL'V5W-It/`&#;t3+fYi9;_dh7#]P`S%[P###G@3Q/7x<=.*W8f3*^B.*`<$R&s6)D+,kn=-O(:B+'/fh(4oJfLlTqLpIPLJ1WRS70Sg'u$ZVd8/lPi63k&B.*/DmT%i[em&]1US.Q/*&+K7p,Mw-,GMT.,GMfov##>`x<CTR(f)_M0E+T#S.MBv7RM<gQ:vkLGM9j@72'#5;x-o$258>?qB#d/1U%1DcY#-aEjLO:-uuCqN9%rU6I$UrllLCGZY#r+TV-[JMk4tiou,7xH)4mm9h$Bb:hLe&2s-,r:T.RJ))3pBtR/OINO@Ff'K++?_s-_XB^77V;^@B-*H#V4BtL]s1O@QEt*A')Sk7us2E#nea5MDat[tPSs+j?090)l^;P(?W]88Wu_3='4FW-cn'mTY3v7&j(npI)qm4(sri0(j1>#&OEpm&U8D?u1.$I6FJXGMGW?LMKCR#%Xl-F%-HW'8viWI)K.De$.#nA,1U@q.iUYV-O8`$'NiJ5'Qe&7CjbH03ifZ3)'I1hL_o7LE_VPh2BXO>'e5)4''VI=9&?Oe-8B4m'i8x21R$J03>ekKMHY[;#ap3$Mx]WmLkDPA#Lp--X?/B.*:'ihL@t_.Q;x/o8N`ptUwcAZ/1ts'/cG7h(gNPwTd%g-)#48r8'F]M3(M39%h*e)E*l9LEKMN]'p$O2Mgma0(fCRR9cP^/3@*m3'_r,++p6Nh3?hjp%+nm---Fc&>fwpxuW=^;-8-NM-&cmM&W:%T.oaVa4bWw*.>dO59,WD^4NE/M^@^[w%X3aZuOuvr%S<^F*3.9AXEd14'Cu:?#xIF2(`V(0(.D#A#VMtT%`8ZA';iwcV)]Z<-2bBH%m'mo7iBdAmpMGA#,39Z-?:^k$,++m^OOPk'svwKumR[r.mo;MKQv(4'5g>CMui[R;r`P??/g0E+Igpq%tu=O/fL5C?sg*58.r(T/T$Gp^?r0@/BKc8/5>PjL[H]s$,Y8a#?x>[KZstP9B.p,3wc``3tTw*.SjLnLSHRV%Gv:1;Jvh>$Q@d2Ca7,gLpxon9SB]R;ODW+GCWI/(Y7[R97EL%Q3d<JMV]1DNxl25MFi:p.$,>>#`(6I$df$>l8c###IwAv-%3<gLc1Ej9^O1E4^MCoI2O0T6.vR[#4HHH)d>***&^Qk'dD24'`PP>u*^M$#lNp$.$]m&M[N,&#8>N)#mp@.*[M:9.g18C#*OWW-fHRpKml@d)-i+%OL[jr?Ah(w8IIsm;oWpIEYM8LEuL0e9Ub]R9,H$9.-@H03@OpZ78<9X7Y+OS:&S=<BX08b>dG7#%=G_R;4G?kMLE@v$)(L^uhOTR9hc9R1idb2M#&;'#S(jI.dZ'u$##q;-Y#vp%H77]6gt9DNLgN1)iP&gL/_'%1j#-J;<124;@279%dNLV%>?.]E[Xpm=NM,($FwaT%>==9/k)Ig(?L0:9gVg=PeN03M^?#k2Cw9lMPVaG##LRg:Y`l8/a<c4:,Vu'&$4Es-Sp7iL5K0D9R';Dbt4)F7^dh7#m7Hm'dW-Elk.)697+=WoB9u99[XIAGl$TT%n/>>#3l1v#b:3/(Ia9B#ak4D#:N.)*Ja-)*:Su>#F;8Q(VcfI&UQ^m&$p)AXUd>7&+UH8'@gru5bf.5'T(tpu+1>$,]3n0#Q)###NeXfLlH42'd=Hq;UCwP/r&+Z6[B9u.>XqB#Yfjp%%C#_'vRsNNDS,m%ZTOp%b,E?Y/n(R<F^8xt-;g=u0;Lu%ZY?C#5_<?#k%AA4f`aI)O#<S7h*-B#Q:L5MF5E?#F)=D<^fUwTr&_B#;G)e.S=:G'PE;U3)L+m#bOc##1=t(3+dfF4Q?TR/U2Cp.A3ed3V@A,tZ<j?#Y*DM%g5uh:WeZp.+HHu.UGt8ACnd:7Q6ti0'@H<6cMk.)SlXv>M7PY>s6s<-+$Ee-wi31`FF1L1Daio0@P9s&Wg:,)dK*>JU.vaGYb.9(%,<K1q6.DjOH%29gsAv-Ja=L#75Dm/Rq@.*dZ'u$d*2.MA@;X-88hd4nALh$KBIIMAK=:.bl@d)#=oT%m@3AF'AC32:0GA#^PlU8+C>D@kA;ZuV^d(5C)0D5h-$k'4qF[Ic2fP1._x@#q]ZjNGEkt$Is*^?V3aK,>L&r8_EXsDe^7MLZr$-'KAni;@98S'I&IS#s$cL++2GC55vW_AQ7=t$l&LA7?,if1mx;+&(>PV-cSs8/#'pS80IGBZ[toe%EVYV-+87<.M:O-)Dl74'5vQ#8jOt8(]Cga4,#@V/Fl(v#?j6h(TS1u7saZDuPqn(WHB4rl:ut&HN1qt#oH.%#fWt&#5g02:e7nwB5V'f)eS(I;8o5Q8(,Bf31EQJ(q@2V8BGQ@tb;)4'+^FY7>3fo5vHYA-FD7D6^^$5+C3,>J=o3DWOH`*4[W*qu:nv(5T*vN>$Ps[kmaA<-i#B%)qg/<-a%Cl%#-#9.,r?Z@s]%$-*jZpS``CI$n`1W@:]L=MH7a0(L3ia41si7@gg29/4PsB4d'CW]`9W$#[U(d-q,os&Ift/Mc8V-Ml7+/M.V.)*'-$,sUb<B-?hU]2C^^q@T9H#8s9?V/*Qna4<))P-CED=/[*'u$P0;hL/#6<-NMKS1K7)4'-=rl/S$xs$c4mNM#(^fLwDj0(@P,uuY6Xt$8USCMX[=?/tWp%4wH7lL0]T4MD?mk0fl)4'-#&#/sri0(QZ`Qs&f8;[g,pq7@kG,*?:;p7$Ws6hg1kZ%s'tn/vH%1(FN9U@,&iE%p/i0(K7I'&1V/4'd;24'Okk,#nwD<-cP#E(C6Bg)#<^3MqL]L(OdnJ&$$d3'Ix$5)`Ai0(Lfe88+'=hG5N'%M%m6xkZlQEnY4;mLO$TfLXP$##Fx#;#eWp%4=XER<1mqB#*cj>.sri0(Nt5AuB31[-VBV0P<GZw0oTVKan>GA#Qj+W-1shweJq+[$N/>Z@M9'b4Awda42`gq%cg-XqskKh($jaa43(jV$Y?t9%JF)?uF,$aM&<Huu#>`5/;;.$$d_LP8Uj[$TH*YO:PAZ0)dg'B#<LqDjCebRMXw%$4.t*qefcD8&oKZruGB53'qMT[u>h$.18[:8.H+mYu'_wd%&$0<-B]@Q-hbNvN)5dp%:deB#?K%1(LKw4](i)M-2>rn;f%sc<C<mv-WKBD3B6:h$ap*P(XAqB#Nk9x^(k4A#Fq]r.)';=/uPWU.*N'[M6/%0):fp0&krK?unVtv/(34^(/U>Fu9#>g.X[?K#mDiF8GD0Z-m+?N)ipf@#9GZT.16mYu;c;a-IXw'&VQ^]=u5IAuXgwv7C7xJjkZP2.U'AW-F$$w7T3>V/O-Xp.pS=Z@I$f^6^IUp$r+vs-A0JS8GgpTT:+&Z$(rE4::O9j(b;@#%f?T;772/a3Iv%E'Yo(NMi'jXuOx&2B.vl$0r`oZ2=m.MgvW(&+Vh$##`uUv-rf9L&.Tkwnr6Sr8WZ'=Sx-h`$<^[tdW;dt$lO#61Y6Xt$2[a69CO:a4bZDhL`r2?>Y7qk.<epq%wcGl$w'2=(QOLKaKlcd$rC$##;;.$$6qAo%EON:8KdM<%LW1,)dg'B#k.BB#o7j>P&>H&N+dSA,Z>hI$d74cM+'0N(I:cZIojWV$'+Bq/7dN@t)Ip&$VUHuuq.>>#%$$;#A6r:)J=[/:J-KaY+Pj/%8a,F%W:W;RFadd2[%v)8F60TKFaXw,g.KQKo6cX(sT3H4$XN6/@n0NCvCS#8A3nU&D&ba4i@P$8W4n0#WgO+`d+?H.rjP]4o@Z29i_Ove)fb,WrI%1(5KQh(_G(t$cQ(0(,j-4'1Y15/Y3*]F+1Zm8ag[A,SX.n8@,,d3kVQX$b?hMUUbN0)VF'U@Y)Wa#TF/j-1ZnE['#x5'g*(oeh-$B#(iDwTpG(>ldeIk=@XI5/x0oG*9-X7%dN8s$9oe:%ZTNT%m[w`am-0f)Z<q4fYTx[#[UWE*$`x(NLiP>u.p>>#Z#+##vq3dtgna^-%)V/sU'N?#J(v]O2ECK*`%Bm$c<Xp%:SsD*O=4)WPE>(+:r%l#cCpF*[njh$lptX$Sf]>*#P>i9+'lc2q,7+*F26Q&94ol##(s?u$6n0#wdI+ir8nCs]re#-_tu,*VUx3Fa8t1)^Zr,2$f2T%f2:U%t6WN'[IRW$TLMp%f8_6&t<&0(ZCIW$5pPj'ZsK^us;k9%0q08@*ob]uRo&kLKXb@XAT.2_[Q(2hHNgG*-F6$$#mqB#]p*P(Do0C#fn#=-w;8T$d:bM(B0B)6dNFT%4<Rl8Cw39%7/Lc`FIVZu4.Uv'2,Guu^Cj20c`08.cc``3%N$xe<=S;%'.c)3Mh%@#YxcC'':-AOQ_`ZuC2'sL2gg309Q-&4Of$T.oN/@ul^n'&P.A5#qtd(#O$(,)kC@xe&Csi-#r]@'eWeNBru@I,RS:JD]trW'rbn.(qI4Q'kxp=uJPHb%MW>Y&@>_;.Y@lo7kF$C#w#?A4TPGYu5RET%1X6C#9Xap%ScZm&mnX>%qt,YSQ?I*.,N<%?8qG,*&k2gL5HII-'VI*.O5.'NoDv:$*5PwKQGY>#taN1#L)MP-mK>w.k%AA4wdCwK5,<Q/+K;<%NtgD3H3&#Gtfp#Gag^D3xjHs&>4IW$S0J]&SuhS%'/`Q&b'Q'#ih/*#r(V$#$U.M3OnUP8qI%rmK-kT%Tg^m&3QR:&GfsDtwob._],MfL22ut$aaf;-bK0b%PbEs$0J#n&SWp6&;NVfU$l<a&QK53'pvYY#GEW:v9ZLA4dnho.8Gr_=v`6#6k]M&='4r4)8mSc$A6gIE_[T#8Y*:HW]cgQ]7%54'a.Gc41elo@q7;Z@aC8V8qtd_uvr@@#ZA0*+Y-m9#%&>uu5BCn#8*kW8'@$a$`rUs-8Fo79VS$9.O^c3']8^v@b89(sx%9.0A,IdjRGW1%,<a^OT%Z48u?HV/8>J&#rCbA#(@PS]ZMoP0i:H,3N0OW-F=Tet:6wA%GXR,;sawQKd:pP'YFCW-3:_x5l55`1MSlq&[Y2W%_L_<-3@6$g=;CZ@>ME<%Rs3c4vVl&5pm,3'MpAwPv:*;&NmIElSVCI;[l`L)1vQJ(fT2^@bL04'ST(0(.kcp00>b;0,`gq%v&j5(Twk'A2Q,tN*,f(#Rl$bO$.uo$kv849_8jedT$+kk&H8f3vh#h/7%54''tBV/1hG3ke&kc4tOKK/LVW?'DNSdNl;[E.@vba4Fh&6/5x#;#4Yu.:cA]'J_:tV?wEtM(&O4U%s:S#8re_g(VXca4'ADO'&LF2(]d<Z@Oal3'OFDNCcG7h(^jl0(Nk>-05@Cn#tke%#:(5*:<9cD4^n[6%&%x[-]B&(%CEK&ZxdvO(?oBEWLK?18tv;E#3&[#8SVhW/A/[)kCF.h(hf#u@.tAZ@@A`/8]Bjn4+8pa4c4(##LFS/1ksp:#frgo.e*gm00$ArNs.E.3iuOo$OMRj4[Z*b[X#8gLfTs?#a5o_uH_d68`XX]u?ca9`6a387aoUP&1hr+;KbR_8lm7f3Wjhh$>4vr-ldYh#uJI-)Ilmo']Yi0(sXH[#g0Jh(P_`$#%2Puu8(2,#`RGw.]Qk&#o0p&$sWtO:F5?v$s_M/)<M-<-EnN30Tv-4']<mu%wA4-v2E%bWp-1hLt,@v$v&tV$7G]=%^3C4fqXfY>+fb,MF$g(%S2YY#osp:#HPUV$CI;8.80g0N+q8V-.*.#%$g&+*-t-AOp3UkHMk'H2XB.0(^IIW$`L:T%+?i/qdlG9%d,nVqF+mYu(rmo%%%u];mcn92,XTD31EFM0CUH=J^he'M%XOjL;ICp7Xv?@'=[8Q/l/^I*(pcoR^'MgLb**j$thWP&u6q-<PF]#8e)m0(cNma4io;(&3L-iLrTS1(&RfI4vqJfLTl,J_TsgG*#bK*<vpBwKIJ4gLFDfRMreaNMExVf:W?bM__7*;?(wFoLvu_#$TNb<-1UP)%o80TK5w>V/80Gc4;T?)uBC0I$x?pw47YFR*Lbe8.%&>uuR+@p.S'+&#mPA_m5g](%XnR29lD_B#*cV#AbO94'<P;:%R4/AbkW(CAGmM-)dPvD-4[?YPo1Ds-W&l[&,)]L(1xD9.283h(m8Bm8Ah'#Z>?ab$aPqs$rSB[#qR2a-pa'dt[Exo%s@AD*f]/E>*8I.%RkvDc35FW@&dm5&bvQX/4,Yv,CLr?#fjrU%lwV)%Y+@p.`2+##<MTw9wb$##qIMW-_2Qd5Au;9/BI?)Nc/s<%`&PA#S$]I*L@[s$ZVd8/W:d#u10Y]#.sgr.<CMO11L>L2Lv_p%5uFG0xw*_553WN2^=g020-`*MF6n3'DG250US@i1Vr0N2>uB)Nh)nL2.M4O1A:39.)cV4#=EBN9uQRm0`@0+*d1:HM1pYA';iwcV0/::'MPwS@e5C7%GlsPAX6Xt$On8c/MaGb%<uwKs0#5$M`Ro?(Nn[D4/iA01hf`#&YJI-)(Q5$0HFp?.'gZ#8`nbEOQv(4']Bda4RD%5JCuF^u7jk,#$,GuuB=^;-W$^5;u<*wZZ2I4$b1B+*bAF>Mjm&w#lwaI)GE#3']aBB#(NtT%Vk^hLgLu9#]OFgL/?+jL2flA+b=X)3HD<1%n,C:%OOV)*m=7)adX=gLZG/-W66gb*m2M7W`;$;%OBFAu<6J@#7Z<Q)Ots9%+>4S7NXTI)9Q^%b-Ua9`mZ*RE^n@K*>ACv-a1[s$hDQ/;spE#-u_x('Q0Yq%...0([Xns$a7Up%?btx'fuf?jI:2?#0%eS%:oG<-q.TV-w2.[B/@v7vvDH&MpkA%#gQKl:n@mQqPId)O2dMZ.cH+5&a?bp%r@1&4dbrs-hOugLWWmuu>v5D->#tnLVbZY#Ii08.&ufg2?mkT`Qah1;nF6.4<f2u$ex],3d:l.:LU[S%TM?xbQqns$`j1h(jM,N#9UYH2QV$gu<_jQ/+pl.UY6Xt$2+D9.FrxICV,N*IX),##%7]P#0sd(#g$(,)YsHd)sS%_Qc%Tn$%BOZ6PX<9/JS5W-s'7s0Zju[$/lAd)drc31%/AM1K<%b4&qTr.G-ia46FvQ'L`HS/u#Ot7n40p7fRNS/[MC*<]rv?-PU&m&[+iV$w-np4)P`X-rG3:MD3.87]k32'+'fO9>CN;7T>BX%ZN4T%'jIw#:hjp%it.CP,+ih$,726:#4_F*(M)I.=@[s$0d/dMlb6lLgu=c4[(=MKcb[a45=3q.?76F[>WrA#]Nsi-gbl-ZVlI21JYIPg^b8_]aD:;$YVm$$PXt&#&dTv-CV>c43Y7%-J^D.3[GO,MhHUv-GH5<.[dCE3w6x8%lHr%,6IM%,[5`0(@17W$E)(n';[mc*o,qQ&M;g]$<X3t$r#?R&Hhjp%EbE9%rv>R&FR39%cN@*Hhbx<?[gB#$*j,*4ao^I*`bP/C41T;.6(1E37YSd3Ji7CuXv(?#x6;ZuMu($#lGa^#%V0^#2<@*H>]d8/vmO9`1DXI)Gb8`&NR$(+&`5C++o@TLkA>]#@6x-)B+bt(&PF&#m8*B#i>dgBINF&#:vkG3ER,@.2m@d)hk,E3jsjT9D=H?ImCI[-Kx7C#[v-t9VF72LL:k>-?Slw9nBbA#o(x%#s)xpAt=L/)KRxQ/7I9^'KC0^'B4g;.h2XSUr1%5Jo]WVRMnp*%6'+m%ZN4T%nZ+T.`l53#S:J3%Vq'E#*b0T%]7%s$da@hCSKK6&0v^pR3B7X)/nX6&/pBTR*),##SG6(#qQ;e.VH?D*SRl_$GG>c4TMrB#TekD#fFuw5Qrun%g(^iB?NiZ>RKPJ(m.4e),&uV-RF@qffMM0(boNe)2%l?%l4fM19xxV?A$qj(0k'u$SxP:A7V2<%l[KF*13Dx.wc``3q=9#]Ex;9/l#l7%/sTm?Ei1^#`OfO.).'N0Cppl&v/^f1r6[c;JeT/)6um>-`JO=&.'_e?5<1^#B*Gs%7F4q?E3G&#7(n;-/DOJ-&#sb&FN-5gU0J<-j=t(8(N4Au7xToNg0P1#[?O&#%NOV-@S]-Fe]jm$BM4I)JtC.3#VYV-OM>c4PkWX-wqAv8u(e3'Ix$5)/]da/=##p4mJ^@)f&'EN<krr?e<tiC9/uaNFts,#0>N)#f[a`/_PiMi#'j#9qblA#dJ2n)lD:Y-$Hd)GeIH##'1qB#].S-#EXI%#diPlLH<H:*^0b>-lkNc'.doJZoLFgjG)ACs9[IRWuorQW2C&/151'SWDDRv$^^D.3%46XVHr^a44t`a4b#U$-9_@x,b83I.)oEV/6f'<RY5Y>-%_,#U%B_l8Sr9B#/$$;#qlP<-9WvX(lTX1DakSm_*A*f%JLgv>X'4B,];(B#WOw2(];AalWV,p8ev<#-9@Ns-aB2W@krw21EDc>-ZSMU%7-0<-_PSn$?S9dtZ^Gx'gV_%eL&F?)AO*W-kBt,ODm;+riL.&exY,;HAwDn8J&i52[=6##klc8.@n:$#PlajMH=AGV/,'%'sg*6O<NupRiS?M9MoUPgu<IQLQUw[-sc``3ICuM(r6KZ$NC^;.r;am$r0EQL'*[V@hD['5S)24'q'3;HQ_`Zuk&qK-7iCU)$KI-)UKos$1Gp;-8Q3b$Zx:<'J)Ys'Hk.Q8t:>^ZaC&l-D_3X-Z<n)5KI_P8hp`#7lnZY#e@(##6$x+`H)w%+A8(`dY+]S@jJjV7aBJ<-l=`5%lt`W-uQtlr$rJfLj>a*M-<UsNvVSc&TbF$@v(N0(cJ%1(P>9]t7)C<-CQQD-[C2&.3PvtLp_P&#RQvw5:APD%mDps76(Hq;w22k'h5F&dY?-1%Ot[E5UIZuui6J'.?oMuLo$T%#)kP]4BJC<-Ik45*D^x2)(9:99IGmv&.pq`3DK*hLtG9@%u5ko.L>kjV<R+<+KT>?-NMr*)%1Vr@rQH&mbSv6#Kww%#uQ6Q'3D5jB1Oj?oqJ;B'6(]E,iS7U&dr+q@7I^'-.aS%9I2RmO+VQ<-h#kC8BhrS&GO'3)/vF1#Q3=&#Kc:J:0uxc3%d>W-hQ^f+Rx%W?TZLk)9D7'TA5rDc$NoI-[&He'q3n0##5B6$PXt&#5oE<8@]L/)-fV<-[da((r$4?-7]wJ8tB9Zh>q$@%$v1'#isb<'jk;68`5-'?UThLRr+Fo(2_d'#v]8xto_h._;d`]+EYMH*O7%s$QUwG;])VT/k%AA4R`>lLsuU:%26Hc&ZT'q%3`,q%#0g*%*0g*%M*N4Y:X%u-%'<fMMT.JM?*/YMh*eN9X^K/`YnDM02S678Z$okrxO]L(;K3X&@;ADAE;3EGf#eI)4D^jD:Hw^8x`k2(cN7LCtc*Htdn06Ad#AKsn8,&#W*s^%Ua+Q8tQP8/+NB9r?S)3r9D7'T;TQm2@sJw92FLWJd[_p$Lr<^Qba@G*H7`q7x0_dkGTh[1Gb9oec[*SnHg?D*;aR#St:Vm9AlkA#qa(x(ppR@<w_0^[jm`>9iZO&#p-;p$Vd%-#Wj9'#W0or'f[/?-#P:]&5&t)$RvAZ&B:ww@o8P&#<4`>:NXCIR;EV^$0C(XS_kcp%NYDkWhmC`jhg=G2.hN)dkkpiBM076Mt&.Z?j[g/)j>0gMj4AZ9o`%T&C0ON&Ns(M'3n'W]Y:O9@dDP)kA.Gc44ZkK*cq5fCjJ$5JQ_+K1vNt,+-Vkc)sF0*+OCMd4/c(Dj44co7=$eK3hqTk$a&S5AsPnY6SJ)?-b(84**8-8(,>nLKo[@>-d,Uh$16Ts-,GnV8WSd0dq<xmqJwBHSbOE3(Ui6vT$stC0ChNP&jsXc2>e>lX<eWs-'(D58?7W`bE0X<-c>eL-%Y)Y&>(L+*?-QTWS&###^f4P]NK[i9%ro,3Ss]q$a&ur7iq+-5<reC#?K*u$o(jX87[c,MJ=UL*17xT%1.BH<R>op&E_?q7'Zv&@W7$##e-N9`Ya4J_;Vml&po%^=Oua)>3kHA%#rEY-2;)?[26)$B[Xp2`a+c'BGcXlXDg<q@mN;W^oX8,9Ct/g22+1k$beu@>:Z=AuMcW#AqQSZ*%qm^#jH.%#5iWs8lSia4Bhp:/#3m;%Sp,W-^m:CZ8heq.[5MG)%Vu42)C<v:>2Sf3)Wr?-F[WT%`n/m&i#p^/nfc;'S80TKn(Tp/d/i+9kn.U/%<$3'Eq(&5t'54'DR#&uYp`gO>FL585#>3)0=4)##?U='fj8q7UI_VI,:*78qpC</`J'a+W####R9<-vgnf&$7g1$#c.HP/2$<JuZxB-'8<LE6dCv98+:E?8AMEk>66%O=H/5##vm,D-i',M<)DSW9MbW$'&S[k=Gr(?@R8Rr9iIRk=X)&vLNk#m#jH.%#F>uu#X'==-PGS3%?4vr-SmsZ)Krq0GkS)O0fr@[#Z_`$#;//vLF_k,885T;.c'7=]mw.f$2^Q88;@e<-:[@$8i3KGNHDV,;bN'N_&^oo.ljS-+$`^iB0T7*-XNMu9u`lA#/D@e%f[EpL.jmi9GF%^P92pmBoulG*Odna$Rr:m8iru'Z]c^-'F2?n8NfpvJRVB-'(9DKOc?Pw$pXZj;PINv'A22Hb8KEC8iL4Au?_*(8^2h^#jH.%#ko6r8>pYD4<rHm8f/+vK%rp9*'+Yv86ftU($ut%(,.oDSRu:W-IXMLWnS$7,^=3?-h/Go(V]$>-t^Ml-E[It''l4_$#C-2Uv;wJ*NGcQ8pV^VIvk^&#CXwZTUpVfLK>62'[=PV-XT^`3Z2Cv-3mDF375^+45a1,d,<^'&>cM*I5=H;[_H-pM/FwM0`m4T%k)(U%8$Dr@&?1Al@l-[BW1r8.;Vml&b9JPBxLYjDJeY@(T2l<-PMBW*<]^jDXRa6&>]^jD9da_8b;c8N3)'586qfcj9TYjD6MO;&bk/J+b>rX%mEU.2Pdl3'i.KQKL]34'IY<T@#qg6Sqhx_%evcA=O9`s/.rBx(8bn68eb6^TT2Puu$3MG#mf%-#RKb&#)X_E'hsK=-l^*_&7+0tB]DXg&#A3*Ct6C#$MNH'6l-4O:]I#WMaNuT9]8<JS_sN0(cJo4R(6$##?0Hl$0*'2#^Kb&#-P@V+`*ub<e<@>Q'soqgf5,*?dUUB#'H(v>sCC`j#Fp98>rX&#TKNh#Xq[+`t^8W-)K#r`rZ8<-7Y(E'-l>UTU7$##6DK-QNRjf1)P'hFtSA@+um;t?kUv'#v6YY#)#$;#0jd(#_rBfb.U%I'w_>2t3+ce),39Z-m&B.*:D>H$/DEO'5vQ#8/aYYux`.='/5B$,0gd<(/gf2)KHmSIV2-sKE2w=lG5c;-lQ%V-D?R://`($#RlIfLR6gq$NIcI):`TqDAM>c4@N*.3LC<A&jmgs-Ja:^JMxe5'Z6n0#Q,no@*x);n$PpD3fH=GJ=o3DWBrY>#cD.h(klqFVi*2mJ&l4B#MHDigf-sM(7d,g)[Dau'W_w[-<n8')wU/>(r5)4':T7^#ITAj-j^a;KPF$##FG*5v/g?iLY>M'#wrgo.SjQW%=fXI)f2qM:[^A<7jr/+4rkCI3_(<v6k+J^$xuXV-?7&M'1?v`-2md'Axh6X7Z$E?#<3*a*Y74h(8Q:87&n9*<Ln#12IJK:'$ViA#_<oA#Iu%h(k`2iK$',fUa;MfL1^CL.L?)Mg(i@CRLimI+YnlX.2>uu#`8x#/(NOV-6ZV/YBcd8/Y^Tv-w^uVHS;Q0)1vQJ(+gB.*,:<p`fSH$$)3Uq%O>'v-/hRX-6$81&e^kp%kv[5%f:XM((TA[,&MXi(8s*qe4D]>gx_n5JG;sl(/dtf*btoK(?G=I#<nu3'o[v@#)j*.)9hjGm+h&'&YIO7Wq3n0#x+'q#vsn%#I8nSJ0]bA#*K$K:GE$C#m(j0(cJI-)-x&-)q'b8.RI=H)EVm8.Fe:S(wvh/15Bo$#%)>>#N.96$pn,D-bv?D-.+cR':H*XCjn7@#a6j'O[jir?_e:wIWqlc-:Bl`@Q=-##Bg732ocl&#C7B0/dKVvgp(8h(n4=@-m>&n.9$$;#f41Q8#5T;.<.Jm/vw?=7v-R=75&pc$?<TF(KA&'f_D?V%*l568mZD?54,:`<-3frQ[dYk'@OkQ-_9fA#Jx.h(d3n0#Epi&#Gn)uJ^IPjtK[LW/tb9b*-jApJv1mA#<a@N%%*:dOYA9s7sl:e35IL,3sTNE(SeuUZ6^^j((osA'KS:a%4[n;-xIl8KA]A:V6(tkD0Re902U)##3Q'>ltr,F%.hBd2T?A#G(Y&g2)sKs6Ao8C4Rq@.*7HZ+0or<K(T.iv#I<)T%d/CU%3*V%Mp78X%NGeouST4mNH+)?#9dvg%a-1oeE-Uv'5G:;$-A###acY8%p##,2DLKV6aJ#-3t(4I)d6c^AB$lD#ikkj1IUFb3[uJL(#,GgL4gZx6`<E:.b@Fj0&$nO(VT<Z@lN)e3>WZ20wocB,/tF/sL>L9;p'Yu%Xq`EO<9M0(]Li>7g4a#84a498UAO9'Fjl>>lK1</pOUv@0afY#7*Zr/*Xha4b+3`#2Sp--Di.P##X&*#SYU(.$7`j9B%/t%QPW]+rgai0=BcW-rmVNt,IL,3aWPJ(rPB%67?;)NP,#1:[AqB#tNDZu[uR[#N8(:8Jp0^ukZWw,K>J;M+rL5/vi*.)iQjMMZDx4]$RirQxG^e$A/E/2so$(#dA$i$4kf;->,sE-6?kV$%`nR9R^#<.U0m:&%N(T.I52k';:rp.e'Ld#`S?tLPRha4O91h(qw%T.pMQ#8wAm`-iBMQE_/QJ(mxlP9a#^G3DJ)UD.+L^#]O?1g?r2ZdY,?v$1]x?Br]wSu/r@[#J3ZT13*jrQC_39%ku%,MwQ#F@`p?o#ierA.qrgo.g8)jT)j]L(KQ#]#QKF2(-emuC4v.h([Uk0(#x?=0^dp7)%5YY#^x5I$/e<kF4+.5/%Pg?[QSK(%iJ))3&V9+*>HjL)DM%[[ku0t:Ba&wQK-kT%HH2?#rMcBZ=ui$'VZ^m&gu[fLMe;v#SsGw[O:$##Ur[fLUrOrL%f8%#L`L*Obkrm$3Jke)_rBCOk8W$>i1RLauKnl//L*8ox;:d*V,lS2e&59%Zkjp%XD7h(APsGZ41*U-e?7E.Jn7`<CqC^##hb,ME_;;$x9+_JE9%RNh=NP&nN*20iYv*3?X1N(QXkD#:cko7PLi'SHFS30hnRs$mSIh(O@ULP975B$6Fw=lmuo:-=SmmSef_E'R;7A45x^=)Ct=d;H<YD46<hm/7%x[-LVd8/:rXGkov>V/*xw4(EvQ#8aT2^@p$:4'j.k@O7t;r7]TND#a0Gc4%Bi0(.cV#AT9H#8dKh?'/Nps$+4c3`Ur8d#%<F&#pp[j%B4vr-Ut;8.7r5dM.FA+4n8ct-g]&=<u0N;7w.r;-s-iI&QLO`#uN_%/uv6muWWEe+s8.lftaXGuu-Z)/0iba4eNrQN2A'gLFO,&#(F9D3a8t1)I^/gL;cSUJ6$;9/:E_#$fle`*AH*?5OF@<$tjLC,6v;E#iG%1(bF%L_#jI@#U&Eh>:C'.(>_8Q&emmH3Yq#6)88Y7(Fl(v#%rQ[#TgCKMqLsYKoF;9&=iD]b:,^v^n%`oI71Hv$EVj]$M@?m8'J(E4?p;%$;k+T.b@.@#xBR-&`E^0K_r0^#5]<e&rS1u7jI]g4+8pa4h]MfLGC?##tGYE4Ui8>,JC$##R@'fFq[K%%AV'f)O4OF3;X^:/ns7f3NLp+MsLND#CbNW@,k?h(]7IY4*(kFV'%#G4#;AV/=Iga4g(_O9Y@Vv@=j3`s1pu40?+$pWrba^uAM`a4+aO*Idk<m/?mLA4<o###[di.0_SQ$$$_Aj0*,6X$8_t`#Oh)>PCr:v#QUg#&Yv>3'Bi1LJ]XZP/RnR[#A?Tu$KK>R&-P>s%mT=@/%&>uuas3$MFWb;IV8###xnj]4e<%##I^7<CncM]$l4NT/&lA:/R7#WI[scH3xKeF4St@.*B_gsLvh/a#c:qQ&p2eY#U#6v$+5G>##CLI&edkp%][4k$iLk2(hQL:&Fw82'qi@G&iptp%^KZ2%kFn/p3x-W$Uu2:/_:aGqww=gLeZoS%em3?kBqNp%vrT%k9<**3,V1vu7NUn#O=#+#t*(f)0*NbNTi;E4S$]I*udJe$@P,G42$ZvK]%>o$D7[x6[O:U'U+M&MwLF02@EWL)OKOA#6eM>#kQJG5h0)'4Mv2PK,@n>#&^P14F#I-)_08s$@^xU7@m@v71pn:/,KDJ%?F[s$'/s</&B6N';fei1[R3T%6)*L5%E.h(-1BO10Q=r7$%a<@9)uX&j3%##.+35&&U8a4*``$'^5GW-T#MnWiei8.a'/@#3WEC#SGPj'v(U@k==@s$2o'HM$+;8.=:.W$.7L^#2F`o$NOlB#wgbu%3(@W$*f@['>A0P8+qO['G5YY#;I=>ZiWaG3,GpS/j8dp.gc``3VUqZLR;MQ&iV9%kK-kT%BP6pJpLO[Re5[UMV^oo#$:F&#G0+KNaVSa$SZQ#B4sb[&s?kj-rDd=-?Zap$o6Op%h(q)5'%g+M4`YgLLH^l#wV)K;mD^;.suQ.%>2K+4&eaC5SZbA=axdC#bKF2(=1CC#]5$;%t0rs-'r%'=Uom_#B:fI(rBdru+2(j'9PcY#nHK4&E>5REWYvU7BHZ8&jx,abxhX]+Bm(Z6c_1p$rUFb3YZTC,ShH1Mfq<]bK#W]uG_sfL-Msu5(.h^#B/)H(m-TjAB/,F%glXa*c>W`-W]s-Z0sZeOV=w[-P%<..SZ2eM%s+Sna;HqVkBB`&<Slo;*WCFIIfhs-,PYi9t_A6(?u;Y$PIw[-,cQ%)4w89%FYR,VSn%@#KmZP/Q[rZuTkjp%&AM))P_`$#j4[,<nvV]+O_(Jh*^88.mN#]>3m^99jrM#RN[fDZpMGA#IOFb3.1P<%k;n)4TMrB#eGId)k_+D#TV2^@?Ixs$s:1<-]R9^7s+Yv,^J@E-/8l(53@br/4K(p/EZ+Y@T;CZ@:94R-*;001joRV6+8.j4POha4,d1p.93Av#>rC9r^2?X0Dld@ba&d]470Sc;A:Hg)vv`0CGRcH3p.mY#b0aZuh<Ke$XxclL@CJr%+Zi0($R+Sn5QT/)<Mfo7%FlD4<r7W]>;Uv-2^7&.YF_^%iq<]bX]b*kl/uu-O^c3's.[)kX6Xt$?+sY$Wa*g)?6D/%>4JKU5-uL'7IrJ:ca0^#BXVU%,:as-YOMIN-$;T.HaJ?u8M&N-1>)6Mtp#D-8-<#MZj;;$Dld@bKS1R<qj?D*od&/1j,KZ-ipC=%:I-AOjkaG<53Z<.)^B.*:#wu5NPo9D;82YNqilrHWv^p.6G$:7m:3IHUvM*I9ZbA<]S,=785YY#(=V:vlAHA4^Ilr-OaAv&1nsj&iX`V$Tl<H29T2^@,nQ-)+G,n&S),@#W.h%%NF^#8Bp#6)lTn-'VZ^m&+p0t*<(a95SxefL+Lmu#d#jE-gsUX%KIs;-+Xb,%B_N/):7*9.u3YD#$>X8/J$AQ'e8M0(Jg%Q^Y,?v$+A^;-Gq_).n)wENt38S[qb`p%LjQD*vIF&#v%cq9JI^n*]SdsQYhx7RZm/F-d:'w%&o$##1@6&%%A0T/Uv-U99XkD#Z&Gr$7oiM:F5JT&dMO$6C0oQ'QZk',T5o_u&p57&Vb8P:$$1B#ZLHS/A*DH2b'>V/X<M0(hI#[/EaHr%q)<Q.J:f]4QF[/:FIR@%/9j'%-Hc,*DWN=&jxnA.8U.+8t+@p.<,Yv,g)BI$%YS#88UcjL?+Xf-pRcd=?YR#8hru--5O-.MI8MjA'0xFDa.Gc4G>^;-]r:]0+2YY#uqd(#d+/-<QatWS5e'E#h[]V%h:j=.uiWI)wl4P]6q84(xadHJcMZr%t$$H-(G'F*&>t(k,:+<-k2ps$qb`p%e51Ip4nK5olb5C+bOlo7mrUq4R4f(#pH^Gaf^'Q/oqd(#'sgo.La0aE4a=x>7kQnrbuGf_Q++11u.q^/;8F6'E`YYu9ND>&CB3E>sn`:8V6C^#;Tm%+_7FNDPdkB#.D###%HW;-so,F%&h'u$I4ww-rpL#?'EG3`:DcI'05G>#x6xoq.DM;(fKG/(;rew#)EOR%2ha$#f3UhL(2ej#7fHiLnJGA#?1[s$RxR7(A;,f*I'Pm/w#ui'28>Yukt2u$)Wis%YQXp%/4^F#RkE.+n[`q8K&pE@j3.lBxWQPpoG/lBS#7_#YrlYuHE,n&@?H%+UNYq.wdt1K_VAwgcRNE,&DgF4>gQv$Y12w&?b;39X#Nm1^v'&=^0/3M`L[t1'qa)+IAW+M2OJs8^YkL:1Ol)4u?lD#*fwA-wrwA-_U<^-@ZUwKK_$QUVkvv&P3@*.AMre;KXCS*;0sbNmllq&0rg=CQoN7WKvFwPD4<YPuSSw>$m*B,bkh8.JHm;.(GeF<+i]m(^IwnS'cF<Un]-##MxW9#YD*1#ca5A4j?:K1Pd0f3R8qZ3*K/f3h5'F.l?I1C9:<_Auf[fLmJ12'N$'6/r&+Z6Nx,f*><B<-@aA32P=$##ca''#(DoHH9+^*#lA`T.+Mc##pB`T.-V(?#1@`T.VG?C#DA`T.71r?#?B`T.6%`?#lB`T.::7[#C@`T.l[Aa#)B`T.J<tx#IrG<-/fG<-OA`T.]GZ$$sK%q.HLn<$MdX3F)SFgL<-kuL0=`T.2xL$#hg`=-(fG<-xB`T.0d@H#9@`T.F6OA#uA`T.Ct*A#KtG<-8X`=-$C`T.U-*h#S@`T.f1W`#jB`T.h:s%$k@`T.3Q@)$1-#t6WQK>$+c/*#Xst.#e)1/#I<x-#U5C/#lj9'#2_jjL-o@(#/K6(#ZY5<-Ow^8/<O>+#7tarLVe=rL?QG&#QZhpLlwXrLSWG&#x/f-#t]W#.n)eQMt/^NM@fipL>+m<-5V3B-hfG<-MYL&OM:CSM8(8qL')8qL6:(sLc.<5CQX$##k^T%J$'4RDCKlmB$eZL2cS^PBJBYwnB(8fGXWmmDjF/p8iEv<B_b+m9xAkjEEU0@-^meF-xq($H9CM*H,,lVCvC^$.))trL^*B-#9Nkv/=NSiB+RZWB@T,<--NSF-Hr.>-PH<+0=`/A='DvlE/T,<-aq5=OG8)UP,'[lLKO/b-,X(G@MxXs8DHo(<XQDnaYEv6a%P1,N.X0,N68<MM.sK5PUkiMN'1Rx-QmXoLf#YrLua5.#.T3rLjd7(#[D5LMR`HY>->hoDRB*g273IL2Y4hM1HFme?vkr,+&B@5./5[qL0LG&#GA1).7mWrL1x.qLhY+rLj92/#FSrt-&$@qL5XVD5C.P@-,YD5B6J/>BgTV=B;kl`F]QKA,>2a5_i.(589BLq>h>$U8A[t#7*dxd-v(+GMQJtL^7uZb%&ji(txcc/C'8P>#)8>##*;G##.GY##2Sl##6`($#:l:$#>xL$#B.`$#F:r$#JF.%#NR@%#R_R%#Vke%#Zww%#_-4&#c9F&#gEX&#kQk&#o^''#sj9'#wvK'#%-_'#)9q'#-E-(#`QK'&w?V`39V7A4=onx4A1OY5EI0;6Ibgr6M$HS7Q<)58UT`l8Ym@M9^/x.:bGXf:f`9G;jxp(<n:Q`<rR2A=vkix=$.JY>(F+;?,_br?0wBS@49$5A8QZlA(a$DW5rj+MD0%>PO&d(WEH1VdDMSrZ>vViBS(f7eQfi:di++PfiuIoeX,WfCsOFlfOuo7[&+T.q$(_.hbS8GD$Sp(EM(1DER=L`EV[H]FZndxF_6auGcH&;Hggx7Il2u4Jn>:PJsSUlJ[wSiKx%n.L<U=loDF`+`/*S%kW2K;$0o$s$41[S%8I<5&<bsl&@$TM'D<5/(HTlf(LmLG)P/.)*TGe`*X`EA+]x&#,a:^Y,eR>;-ikur-m-VS.qE75/u^nl/#wNM0'90/1+Qgf1/jGG23,))37D``3;]@A4?uwx4C7XY5GO9;6Khpr6O*QS7SB258WZil8[sIM9`5+/:dMbf:hfBG;$Vg4]8Y,M^:SKl]aa-DN%#<ipmj?P;]N<H=x':oD>Heh2Z&#d3]8YD4^Au`4Wg/g2hIP)N$t2.3b5^G3oSkk41_E.NnUwA-;YwA-oe`=-`Y#<-hY#<-iY#<-jY#<-kY#<-lY#<-m`>W-irQF%WuQF%&*F,3&*F,3&*F,3&*F,3&*F,3&*F,3&*F,3&*F,3&*F,3&*F,3&*F,3&*F,3&*F,3(9kG3rX:d-kuQF%'3bG3'3bG3'3bG3'3bG3'3bG3'3bG3'3bG3'3bG3'3bG3'3bG3'3bG3'3bG3'3bG3)B0d3rX:d-luQF%(<'d3(<'d3(<'d3(<'d3(<'d3(<'d3(<'d3(<'d3(<'d3(<'d3(<'d3(<'d3(<'d3*KK)4rOuG-gG8F-_mDE-`v`a-1E+.-N?lk:=k9^#Z2c'&*tj-$4<k-$'LSDXS]%:).m6@'Mfv--x>sx+B1?>#Ner*>/`:;$31lxu.i&gLuwSfL(XPgLsNX?QX64V.h$2eGia$]-``6@'YZ2^#+7`T.,),##9K<$5&5>##^vK'#YGY##N)d3#jkF6#.W*9#aM#<-N6T;-t).m/^%*)#gMc###Y`=-O6T;-P6T;-Q6T;-R6T;-S6T;-T6T;-hH,[.<>N)#('HpLU['(i-D=G17S>:12%###=s)/,,u)1^t=R4#"
-    -- ГЌГЂГ‘ГђГЂГ‹ Г‚ ГЋГ—ГЉГЋ, ГЌГ“ Г„ГЂ
     fonts = {}
     local config = imgui.ImFontConfig()
     local iconfig = imgui.ImFontConfig()
@@ -5301,7 +5555,8 @@ imgui.OnInitialize(function()
         "HELP",
         "RELOAD",
         "REFRESH",
-        "REFRESH_ALERT"
+        "REFRESH_ALERT",
+        "COINS"
     }
     local builder = imgui.ImFontGlyphRangesBuilder()
     local range = imgui.ImVector_ImWchar()
@@ -5524,11 +5779,6 @@ function imgui.ToggleButton(str_id, bool, anim_speed)
     return clicked
 end
 
--- ============================================================
---  imgui.PillButton  --  pill toggle: smooth slide, hover glow, white text
---  Usage: imgui.PillButton(str_id, bool_ptr, [anim_speed])
---  Returns true on click
--- ============================================================
 function imgui.PillButton(str_id, bool_ptr, anim_speed)
     local s      = anim_speed or 0.13
     local h      = imgui.GetTextLineHeightWithSpacing()
@@ -5536,7 +5786,7 @@ function imgui.PillButton(str_id, bool_ptr, anim_speed)
     local pill_w = math.floor(pill_h * 1.9)
     local pad    = 2
     local knob_r = math.floor((pill_h - pad * 2) * 0.5)
-    local rr     = math.floor(pill_h * 0.5)   -- full round ends
+    local rr     = math.floor(pill_h * 0.5)
     local p      = imgui.GetCursorScreenPos()
     local cp     = g_cpos()
     local DL     = imgui.GetWindowDrawList()
@@ -5553,8 +5803,6 @@ function imgui.PillButton(str_id, bool_ptr, anim_speed)
         }
     end
     local st = elements.custom.toggle_button[key]
-
-    -- invisible hit area
     imgui.PushStyleColor(imgui.Col.Button,        iv4(0,0,0,0))
     imgui.PushStyleColor(imgui.Col.ButtonHovered, iv4(0,0,0,0))
     imgui.PushStyleColor(imgui.Col.ButtonActive,  iv4(0,0,0,0))
@@ -5563,55 +5811,38 @@ function imgui.PillButton(str_id, bool_ptr, anim_speed)
         bool_ptr[0] = not bool_ptr[0]
     end
     imgui.PopStyleColor(3)
-
-    -- animate t toward target
     local target = bool_ptr[0] and 1.0 or 0.0
     local diff   = target - st.t
     local step   = dt / s
     if math.abs(diff) <= step then st.t = target
     else st.t = st.t + (diff > 0 and step or -step) end
     local t_ease = st.t * st.t * (3.0 - 2.0 * st.t)
-
-    -- hover
     if imgui.IsItemHovered() then
         st.hover_t     = math.min(1.0, st.hover_t + dt * 10)
         st.hover_phase = st.hover_phase + dt * 7
     else
         st.hover_t     = math.max(0.0, st.hover_t - dt * 10)
     end
-    -- subtle white flicker on hover (no colour, just brightness)
     local flicker = 0.0
     if st.hover_t > 0.01 then
         flicker = st.hover_t * (0.08 + 0.08 * math.sin(st.hover_phase))
     end
-
     local cx = p.x + 2
     local cy = p.y + 2
-
-    -- pill background: dark-gray -> green, plus hover brightness
     local bg_r = 0.18 + flicker
     local bg_g = 0.18 + 0.52 * t_ease + flicker
     local bg_b = 0.18 + flicker
     DL:AddRectFilled(iv2(cx, cy), iv2(cx + pill_w, cy + pill_h),
         conv_c(iv4(bg_r, bg_g, bg_b, 1.0)), rr)
-
-    -- pill border
     DL:AddRect(iv2(cx, cy), iv2(cx + pill_w, cy + pill_h),
         conv_c(iv4(0.35, 0.35 + 0.55 * t_ease, 0.35, 0.6 + 0.4 * t_ease)), rr, nil, 1.0)
-
-    -- knob
     local travel  = pill_w - pad * 2 - knob_r * 2
     local knob_cx = cx + pad + knob_r + travel * t_ease
     local knob_cy = cy + pill_h * 0.5
-
-    -- knob shadow
     DL:AddCircleFilled(iv2(knob_cx + 1, knob_cy + 1),
         knob_r, conv_c(iv4(0, 0, 0, 0.25)), 32)
-    -- knob body
     DL:AddCircleFilled(iv2(knob_cx, knob_cy),
         knob_r, conv_c(iv4(0.95, 0.95, 0.95, 1.0)), 32)
-
-    -- label: white, no colour change
     imgui.SameLine()
     imgui.SetCursorPosY(cp.y + (h - imgui.GetTextLineHeight()) * 0.5 - 4)
     imgui.SetCursorPosX(g_cpos().x + 4)
@@ -5721,6 +5952,9 @@ function load_cfg()
         cVARS.autolarek[0] = config.autolarek
         cVARS.autobeer[0] = config.autobeer
         cVARS.antibot_antifreeze[0] = config.antibot_antifreeze
+        cVARS.minigame_rage_mode[0] = config.minigame_rage_mode or false
+        cVARS.minigame_pct_min[0] = config.minigame_pct_min or 80
+        cVARS.minigame_pct_max[0] = config.minigame_pct_max or 100
         cVARS.enable_jump[0] = config.enable_jump
         cVARS.enable_random_turns[0] = config.enable_random_turns
         cVARS.camera_smooth_close[0] = config.camera_smooth_close
@@ -5741,6 +5975,8 @@ function load_cfg()
         cVARS.bot_hotkey[0] = config.bot_hotkey
         cVARS.check_stuck[0] = config.check_stuck
         cVARS.show_navmesh[0] = config.show_navmesh or false
+        cVARS.tree_zone_mode[0] = config.tree_zone_mode or 0
+        cVARS.player_ignore_mode[0] = config.player_ignore_mode or 0
         if config.menu_command then
             for i = 1, math.min(63, #config.menu_command) do
                 cVARS.menu_command[i-1] = config.menu_command:sub(i,i):byte()
@@ -5856,10 +6092,13 @@ function load_cfg()
             enable_jump = true,
             enable_random_turns = true,
             antibot_antifreeze = false,
+            minigame_rage_mode = false,
+            minigame_pct_min = 80,
+            minigame_pct_max = 100,
             camera_smooth_close = 0.15,
-    camera_turn_slow = 45.0,
-    camera_turn_mid = 120.0,
-    camera_turn_fast = 360.0,
+            camera_turn_slow = 45.0,
+            camera_turn_mid = 120.0,
+            camera_turn_fast = 360.0,
             camera_smooth_mid = 0.08,
             camera_smooth_far = 0.04,
             camera_dist = 10.0,
@@ -5871,6 +6110,8 @@ function load_cfg()
             antiadmin_play_sound = new.bool(false),
             avatar_path = new.char[256]("avatar.png"),
             telegram_api_url = "https://api.telegram.org",
+            tree_zone_mode = 0,
+            player_ignore_mode = 0,
         }
     end
 end
@@ -5917,6 +6158,9 @@ function save_cfg()
     config.anti_vehicle = cVARS.anti_vehicle[0]
     config.selected_sdacha_index = cVARS.selected_sdacha_index[0]
     config.antibot_antifreeze = cVARS.antibot_antifreeze[0]
+    config.minigame_rage_mode = cVARS.minigame_rage_mode[0]
+    config.minigame_pct_min = cVARS.minigame_pct_min[0]
+    config.minigame_pct_max = cVARS.minigame_pct_max[0]
     config.enable_jump = cVARS.enable_jump[0]
     config.enable_random_turns = cVARS.enable_random_turns[0]
     config.animspeed_enabled = cVARS.animspeed_enabled[0]
@@ -5945,6 +6189,8 @@ function save_cfg()
     config.antiadmin_sound_path = u8:decode(ffi.string(cVARS.antiadmin_sound_path))
     config.avatar_path = u8:decode(ffi.string(cVARS.avatar_path))
     config.telegram_api_url = u8:decode(ffi.string(cVARS.telegram_api_url))
+    config.tree_zone_mode = cVARS.tree_zone_mode[0]
+    config.player_ignore_mode = cVARS.player_ignore_mode[0]
     local combo_str = ""
     if cVARS.combo_key1[0] and cVARS.combo_key1[0] ~= 0 then
         combo_str = getKeyName(cVARS.combo_key1[0])
@@ -5957,3 +6203,5 @@ function save_cfg()
     f:write(encodeJson(config))
     f:close()
 end
+
+
